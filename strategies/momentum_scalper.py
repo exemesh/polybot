@@ -3,15 +3,15 @@ Momentum Scalper Strategy
 Targets markets approaching resolution with strong momentum signals.
 
 This strategy looks for:
-1. Markets closing within 48 hours where one outcome has strong momentum
+1. Markets closing within 30 days where one outcome has strong momentum
 2. Near-expiry arbs: YES + NO < $1 on markets about to close (guaranteed quick profit)
-3. High-confidence near-binary outcomes: markets where one side is 85%+
+3. High-confidence near-binary outcomes: markets where one side is 65%+
    and the other side is still trading above 0 — buy the likely winner cheap
 
 Trade rules:
-- $1 USD per trade
-- Focus on markets closing within 48 hours
-- Max 5 trades per cycle
+- $2-5 USD per trade (arbs $5, momentum $3, value $2)
+- 30-day max timeline, prefer markets closing sooner
+- Max 10 trades per cycle
 """
 
 import asyncio
@@ -91,7 +91,7 @@ class MomentumScalperStrategy:
             try:
                 resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
                 hours_until = (resolution_dt - now).total_seconds() / 3600
-                if hours_until < 1 or hours_until > 336:  # AGGRESSIVE: 14 days (was 7)
+                if hours_until < 1 or hours_until > 720:  # 30-day max timeline
                     continue
             except Exception:
                 continue
@@ -173,9 +173,9 @@ class MomentumScalperStrategy:
                         "score": return_if_win * (168 / max(hours_until, 1)),
                     })
 
-            # ── Type 3: Value near-expiry ──
-            # AGGRESSIVE: Markets closing in <168h, wider price range, 15% min
-            if hours_until <= 168:
+            # ── Type 3: Value play ──
+            # Markets closing within 30 days, wider price range, 15% min return
+            if hours_until <= 720:
                 if 0.10 <= yes_mid <= 0.80 and yes_book.spread < 0.15:
                     return_pct = (1.0 / yes_mid - 1.0) * 100
                     if return_pct >= 15:  # 15% min (was 30%)

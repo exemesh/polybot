@@ -150,7 +150,7 @@ class SpreadCaptureStrategy:
 
             return_pct = net_profit / total * 100
 
-            # Calculate hours until resolution for scoring
+            # Calculate hours until resolution for scoring — 30-day max timeline
             hours_until = None
             end_date = market.get("end_date_iso", market.get("endDateIso", ""))
             if end_date:
@@ -158,6 +158,8 @@ class SpreadCaptureStrategy:
                     resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
                     hours_until = (resolution_dt - now).total_seconds() / 3600
                     if hours_until < 1:  # Skip about-to-close
+                        continue
+                    if hours_until > 720:  # > 30 days — skip
                         continue
                 except Exception:
                     pass

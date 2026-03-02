@@ -1,14 +1,14 @@
 """
 General Market Scanner Strategy
 Scans all active Polymarket markets for mispriced opportunities.
-Focuses on SHORT-DURATION markets (closing within hours to 7 days) for quick returns.
+Trades markets closing within 30 days for aggressive capital turnover.
 Uses real edge calculation instead of naive fair-value assumptions.
 
 Trade rules:
-- $1 USD per trade
-- Minimum 30% return potential
-- Prefer markets closing within 72 hours
-- Max 10 trades per cycle
+- $2-5 USD per trade (arbs $5, value $2)
+- Minimum 15% return potential
+- 30-day max timeline, prefer markets closing sooner
+- Max 20 trades per cycle
 """
 
 import asyncio
@@ -103,9 +103,8 @@ class GeneralScannerStrategy:
                 skipped_no_tokens += 1
                 continue
 
-            # ═══ Focus on markets with reasonable resolution windows ═══
-            # Prefer short-duration but allow up to 30 days
-            # Skip > 90 days and no-end-date (super long-dated)
+            # ═══ 30-DAY MAX TIMELINE — aggressive capital turnover ═══
+            # Only trade markets resolving within 30 days
             end_date = market.get("end_date_iso", "")
             hours_until = None
             if end_date:
@@ -115,7 +114,7 @@ class GeneralScannerStrategy:
                     if hours_until < 2:  # Too close to expiry
                         skipped_too_close += 1
                         continue
-                    if hours_until > 2160:  # > 90 days — skip
+                    if hours_until > 720:  # > 30 days — skip
                         skipped_too_far += 1
                         continue
                 except Exception:

@@ -142,13 +142,15 @@ class CrossPlatformArbStrategy:
                 if time.time() - self.executed_arbs[condition_id] < 3600:
                     continue
 
-            # Filter: only trade markets with >1 week until resolution
+            # Filter: 30-day max timeline, min hours from settings
             end_date = market.get("end_date_iso", "")
             if end_date:
                 try:
                     resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
                     hours_until = (resolution_dt - datetime.now(timezone.utc)).total_seconds() / 3600
                     if hours_until < self.settings.ARB_MIN_HOURS_TO_RESOLUTION:
+                        continue
+                    if hours_until > 720:  # > 30 days — skip
                         continue
                 except Exception:
                     pass
