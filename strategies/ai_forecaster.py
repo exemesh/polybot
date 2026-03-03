@@ -305,11 +305,13 @@ class AIForecasterStrategy:
         token_id = market["yes_token_id"] if side == "BUY_YES" else market["no_token_id"]
         price = yes_price if side == "BUY_YES" else no_price
 
+        hrs = market.get('hours_until')
+        hrs_str = f"{hrs:.0f}h" if hrs else "unknown"
         logger.info(
             f"[AI FORECASTER] {side} | {market['question'][:55]} | "
             f"@ {price:.3f} | AI P(YES)={ai_prob:.2f} | "
             f"Edge: {edge*100:.1f}% | Size: ${trade_size:.2f} | "
-            f"Closes: {market['hours_until']:.0f}h"
+            f"Closes: {hrs_str}"
         )
 
         result = await self.poly_client.place_market_order(
@@ -338,7 +340,7 @@ class AIForecasterStrategy:
 
             logger.info(
                 f"AI trade executed! {side} @ ${price:.3f} | "
-                f"Edge: {edge*100:.1f}% | Resolves: {market['hours_until']:.0f}h"
+                f"Edge: {edge*100:.1f}% | Resolves: {hrs_str}"
             )
             return True
 
