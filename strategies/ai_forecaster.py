@@ -80,6 +80,10 @@ class AIForecasterStrategy:
             # Step 2: Run AI analysis on top candidates
             trades_executed = 0
             llm_calls = 0
+            markets_checked = 0
+            skipped_no_book = 0
+            skipped_low_liq = 0
+            skipped_price_range = 0
 
             for market in candidates:
                 if llm_calls >= MAX_LLM_CALLS_PER_CYCLE:
@@ -89,18 +93,28 @@ class AIForecasterStrategy:
                     logger.info(f"AIForecaster: hit trade limit ({MAX_TRADES_PER_CYCLE})")
                     break
 
-                result = await self._analyze_and_trade(market)
-                llm_calls += 1
+                markets_checked += 1
+                result, reason = await self._analyze_and_trade(market)
+
+                if reason == "llm_called":
+                    llm_calls += 1
+                elif reason == "no_book":
+                    skipped_no_book += 1
+                elif reason == "low_liq":
+                    skipped_low_liq += 1
+                elif reason == "price_range":
+                    skipped_price_range += 1
 
                 if result:
                     trades_executed += 1
 
                 # Rate limit between LLM calls
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
 
             logger.info(
-                f"AIForecaster complete: {llm_calls} LLM calls, "
-                f"{trades_executed} trades executed"
+                f"AIForecaster complete: {markets_checked} checked, {llm_calls} LLM calls, "
+                f"{trades_executed} trades | skipped: no_book={skipped_no_book}, "
+                f"low_liq={skipped_low_liq}, price_range={skipped_price_range}"
             )
 
         except Exception as e:
@@ -203,10 +217,10 @@ class AIForecasterStrategy:
 
         return candidates[:20]  # Top 20 candidates for AI analysis
 
-    async def _analyze_and_trade(self, market: Dict) -> bool:
+    async def _analyze_and_trade(self, market: Dict):
         """
         Run AI superforecaster on a single market and trade if edge found.
-        Returns True if a trade was executed.
+        Returns (True/False, reason_string).
         """
         question = market["question"]
         condition_id = market["condition_id"]
@@ -216,19 +230,21 @@ class AIForecasterStrategy:
         no_book = await self.poly_client.get_order_book(market["no_token_id"])
 
         if not yes_book or not no_book:
-            return False
+            logger.debug(f"No order book: {question[:50]}")
+            return False, "no_book"
 
         min_liq = min(yes_book.liquidity_usd, no_book.liquidity_usd)
         if min_liq < MIN_LIQUIDITY_USD:
-            return False
+            logger.debug(f"Low liquidity (${min_liq:.0f}): {question[:50]}")
+            return False, "low_liq"
 
         yes_mid = yes_book.mid_price
         no_mid = no_book.mid_price
 
         # Price range check — need genuine uncertainty for AI to find edges
         if yes_mid < PRICE_RANGE[0] or yes_mid > PRICE_RANGE[1]:
-            logger.debug(f"Skipping (price out of range {yes_mid:.3f}): {question[:50]}")
-            return False
+            logger.debug(f"Price out of range ({yes_mid:.3f}): {question[:50]}")
+            return False, "price_range"
 
         # Step 2: Ask AI for probability estimate
         ai_prob = await self.ai_client.get_probability(
@@ -240,8 +256,8 @@ class AIForecasterStrategy:
         )
 
         if ai_prob is None:
-            logger.debug(f"AI returned no probability for: {question[:60]}")
-            return False
+            logger.warning(f"AI returned no probability for: {question[:60]}")
+            return False, "llm_called"
 
         # Step 3: Calculate edge
         yes_edge = ai_prob - yes_mid        # Positive = AI thinks YES is underpriced
@@ -259,11 +275,12 @@ class AIForecasterStrategy:
 
         # Step 4: Trade if edge is significant
         if edge < MIN_EDGE_PCT:
-            logger.debug(f"Edge too small ({edge*100:.1f}% < {MIN_EDGE_PCT*100:.0f}%) — skip")
-            return False
+            logger.info(f"AI: edge too small ({edge*100:.1f}%) for '{question[:50]}' — skip")
+            return False, "llm_called"
 
         # Step 5: Execute trade
-        return await self._execute_trade(market, trade_side, edge, ai_prob, yes_mid, no_mid)
+        traded = await self._execute_trade(market, trade_side, edge, ai_prob, yes_mid, no_mid)
+        return traded, "llm_called"
 
     async def _execute_trade(
         self,
