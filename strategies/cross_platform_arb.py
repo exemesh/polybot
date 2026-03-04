@@ -150,7 +150,7 @@ class CrossPlatformArbStrategy:
                     hours_until = (resolution_dt - datetime.now(timezone.utc)).total_seconds() / 3600
                     if hours_until < self.settings.ARB_MIN_HOURS_TO_RESOLUTION:
                         continue
-                    if hours_until > 720:  # > 30 days — skip
+                    if hours_until > 2160:  # > 90 days (3 months) — skip
                         continue
                 except Exception:
                     pass

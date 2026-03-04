@@ -159,7 +159,7 @@ class SpreadCaptureStrategy:
                     hours_until = (resolution_dt - now).total_seconds() / 3600
                     if hours_until < 1:  # Skip about-to-close
                         continue
-                    if hours_until > 720:  # > 30 days — skip
+                    if hours_until > 2160:  # > 90 days (3 months) — skip
                         continue
                 except Exception:
                     pass

@@ -210,7 +210,7 @@ class SportsIntelStrategy:
                 hours_until = (resolution_dt - now).total_seconds() / 3600
                 if hours_until < 2:  # Too close to expiry
                     continue
-                if hours_until > 720:  # > 30 days — SKIP (was the major problem)
+                if hours_until > 2160:  # > 90 days — SKIP (was the major problem)
                     skipped_long += 1
                     continue
                 m["_hours_until"] = hours_until
@@ -419,7 +419,7 @@ class SportsIntelStrategy:
 
                 # Value bets: ONLY when hours_until is known and < 30 days
                 # (already filtered in _find_sports_markets, but double-check)
-                if hours_until and hours_until <= 720:
+                if hours_until and hours_until <= 2160:
                     if 0.10 <= yes_mid <= 0.65 and min_liq > 50 and yes_book.spread < 0.08:
                         return_pct = (1.0 / yes_mid - 1.0) * 100
                         if return_pct >= 30:
@@ -552,8 +552,8 @@ class SportsIntelStrategy:
         return None
 
     async def _execute_trade(self, opp: Dict) -> bool:
-        """Execute a sports/event trade. AGGRESSIVE: Arbs $5, Value $2."""
-        trade_size = 5.00 if opp["side"] == "BOTH" else 2.00  # AGGRESSIVE sizing
+        """Execute a sports/event trade. Arbs $5, Value $10."""
+        trade_size = 5.00 if opp["side"] == "BOTH" else 10.00  # $10 value bets for 5x+ payout
 
         approved, reason = self.risk_manager.approve_trade(
             trade_size, "sports_intel", opp["condition_id"])

@@ -114,7 +114,7 @@ class GeneralScannerStrategy:
                     if hours_until < 2:  # Too close to expiry
                         skipped_too_close += 1
                         continue
-                    if hours_until > 720:  # > 30 days — skip
+                    if hours_until > 2160:  # > 90 days (3 months) — skip
                         skipped_too_far += 1
                         continue
                 except Exception:
@@ -255,11 +255,10 @@ class GeneralScannerStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a paper/live trade for an opportunity.
-        Arb trades: $3 USD (guaranteed profit, higher size = more profit)
-        Value trades: $1 USD (speculative, keep size small)
+        Arb trades: $5 (guaranteed profit)
+        Value trades: $10 (longshot bets targeting 5x+ payout)
         """
-        # AGGRESSIVE: Arb $5 (guaranteed), Value $2 (speculative)
-        trade_size = 5.00 if opp["type"] == "arb" else 2.00
+        trade_size = 5.00 if opp["type"] == "arb" else 10.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "general_scanner", opp["condition_id"])
         if not approved:

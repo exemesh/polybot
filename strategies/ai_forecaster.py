@@ -1,24 +1,23 @@
 """
-AI Superforecaster Strategy
+AI Superforecaster Strategy — LONGSHOT HUNTER MODE
 Adapted from Polymarket/agents official framework.
 
-Uses OpenAI LLM as a "superforecaster" to independently estimate market probabilities,
-then trades when the AI's estimate diverges significantly from the market price.
-
-This is the most sophisticated strategy — it uses reasoning and world knowledge
-rather than just price patterns or arbitrage math.
+Uses OpenAI LLM as a "superforecaster" to find HIGH-PAYOUT longshot bets.
+Targets: $10 bets that can pay $50+ (5x+ returns).
+Timelines up to 3 months are fine — profitability over speed.
 
 Flow:
-1. Fetch top markets from Gamma API (30-day window, decent liquidity)
-2. For each candidate market, ask the LLM to estimate P(YES)
+1. Fetch top markets from Gamma API (up to 90-day window)
+2. For each candidate, ask the LLM to estimate P(YES)
 3. Compare LLM probability to current market price
-4. If edge > 10%, execute a value trade
-5. Max 5 LLM calls per cycle (cost control), max 3 trades
+4. Trade when AI finds underpriced longshots with 5x+ payout potential
+5. Max 10 LLM calls per cycle, max 5 trades
 
 Trade rules:
-- $3 USD per AI-driven value trade
-- Minimum 10% edge (LLM vs market price)
-- 30-day max timeline
+- $10 USD per AI-driven longshot bet
+- Minimum 8% edge (LLM vs market price)
+- 90-day max timeline (3 months)
+- Focus on tokens priced $0.03-$0.25 for max payout multiplier
 - Requires OPENAI_API_KEY — gracefully skips if not set
 """
 
@@ -35,15 +34,16 @@ from core.risk_manager import RiskManager
 
 logger = logging.getLogger("polybot.ai_forecaster")
 
-# ─── Strategy Constants ──────────────────────────────────────────────
-MAX_LLM_CALLS_PER_CYCLE = 5       # Cost control: max 5 API calls per run
-MAX_TRADES_PER_CYCLE = 3          # Max 3 AI-driven trades per run
-MIN_EDGE_PCT = 0.10               # 10% minimum edge to trade
-TRADE_SIZE_USD = 3.00             # $3 per AI trade
-MIN_LIQUIDITY_USD = 50.0          # Need decent liquidity for value bets
+# ─── Strategy Constants — LONGSHOT HUNTER ────────────────────────────
+MAX_LLM_CALLS_PER_CYCLE = 10      # More LLM calls to find the best longshots
+MAX_TRADES_PER_CYCLE = 5          # Up to 5 trades per run
+MIN_EDGE_PCT = 0.08               # 8% minimum edge to trade
+TRADE_SIZE_USD = 10.00            # $10 per bet — targeting $50+ payouts
+MIN_LIQUIDITY_USD = 25.0          # Lower liq threshold for longshot markets
 MIN_HOURS_TO_RESOLUTION = 4       # At least 4 hours out
-MAX_HOURS_TO_RESOLUTION = 720     # 30-day max timeline
-PRICE_RANGE = (0.03, 0.97)        # Wide range — AI can find edges at extremes too
+MAX_HOURS_TO_RESOLUTION = 2160    # 90-day (3 month) max timeline
+PRICE_RANGE = (0.03, 0.97)        # Wide range — AI can find edges at extremes
+# Longshot sweet spot: tokens at $0.03-$0.25 give 4x-33x payout on $10
 
 
 class AIForecasterStrategy:
@@ -206,16 +206,28 @@ class AIForecasterStrategy:
             f"no_question={skipped_no_question}, has_position={skipped_position}"
         )
 
-        # Sort by volume (most liquid/interesting markets first)
-        # Markets with known resolution get a boost
+        # Sort to prioritize LONGSHOT opportunities:
+        # 1. Markets with mid-range prices (0.05-0.30) — highest payout multipliers
+        # 2. Higher volume = more interesting/liquid
+        # 3. Known resolution date gets a small boost
         def sort_key(m):
-            vol = m["volume"]
-            time_boost = (720 / max(m["hours_until"], 1)) if m["hours_until"] else 1.0
-            return vol * time_boost
+            vol = max(m["volume"], 1)
+            yes_p = m["yes_price"]
+            # Longshot bonus: tokens at $0.05-$0.25 get priority (5x-20x payout)
+            if 0.05 <= yes_p <= 0.25:
+                longshot_bonus = 10.0  # Strong priority for high-payout range
+            elif 0.25 < yes_p <= 0.50:
+                longshot_bonus = 3.0   # Medium priority
+            elif yes_p < 0.05 and yes_p > 0:
+                longshot_bonus = 5.0   # Ultra-longshot (but might be too unlikely)
+            else:
+                longshot_bonus = 1.0   # Regular markets
+            time_boost = 1.5 if m["hours_until"] else 1.0
+            return vol * longshot_bonus * time_boost
 
         candidates.sort(key=sort_key, reverse=True)
 
-        return candidates[:20]  # Top 20 candidates for AI analysis
+        return candidates[:30]  # Top 30 candidates for AI analysis
 
     async def _analyze_and_trade(self, market: Dict):
         """
@@ -307,10 +319,11 @@ class AIForecasterStrategy:
 
         hrs = market.get('hours_until')
         hrs_str = f"{hrs:.0f}h" if hrs else "unknown"
+        payout = trade_size / price if price > 0 else 0
         logger.info(
             f"[AI FORECASTER] {side} | {market['question'][:55]} | "
-            f"@ {price:.3f} | AI P(YES)={ai_prob:.2f} | "
-            f"Edge: {edge*100:.1f}% | Size: ${trade_size:.2f} | "
+            f"@ ${price:.3f} | AI P(YES)={ai_prob:.2f} | "
+            f"Edge: {edge*100:.1f}% | ${trade_size:.0f} → ${payout:.0f} potential | "
             f"Closes: {hrs_str}"
         )
 
@@ -340,7 +353,8 @@ class AIForecasterStrategy:
 
             logger.info(
                 f"AI trade executed! {side} @ ${price:.3f} | "
-                f"Edge: {edge*100:.1f}% | Resolves: {hrs_str}"
+                f"Edge: {edge*100:.1f}% | ${trade_size:.0f} → ${payout:.0f} payout | "
+                f"Resolves: {hrs_str}"
             )
             return True
 

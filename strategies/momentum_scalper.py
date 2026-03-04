@@ -91,7 +91,7 @@ class MomentumScalperStrategy:
             try:
                 resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
                 hours_until = (resolution_dt - now).total_seconds() / 3600
-                if hours_until < 1 or hours_until > 720:  # 30-day max timeline
+                if hours_until < 1 or hours_until > 2160:  # 90-day (3 month) max timeline
                     continue
             except Exception:
                 continue
@@ -175,7 +175,7 @@ class MomentumScalperStrategy:
 
             # ── Type 3: Value play ──
             # Markets closing within 30 days, wider price range, 15% min return
-            if hours_until <= 720:
+            if hours_until <= 2160:
                 if 0.10 <= yes_mid <= 0.80 and yes_book.spread < 0.15:
                     return_pct = (1.0 / yes_mid - 1.0) * 100
                     if return_pct >= 15:  # 15% min (was 30%)
@@ -225,13 +225,13 @@ class MomentumScalperStrategy:
         return opportunities
 
     async def _execute_trade(self, opp: Dict) -> bool:
-        """Execute trade. AGGRESSIVE: Arbs $5, Momentum $3, Value $2."""
+        """Execute trade. Arbs $5, Momentum $10, Value $10."""
         if opp["side"] == "BOTH":
             trade_size = 5.00  # Arbs: guaranteed profit
         elif opp["type"].startswith("momentum"):
-            trade_size = 3.00  # High-conviction momentum plays
+            trade_size = 10.00  # High-conviction momentum plays
         else:
-            trade_size = 2.00  # Near-expiry value bets
+            trade_size = 10.00  # Value bets targeting 5x+ payout
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "momentum_scalper", opp["condition_id"])
         if not approved:
