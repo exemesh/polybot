@@ -133,7 +133,8 @@ jobs:
         run: |
           git add data/bot_control.json
           git diff --cached --quiet && echo "No control changes to commit" || \
-          (git commit -m "Update bot control state [skip ci]" && git push origin main)
+          (git commit -m "Update bot control state [skip ci]" && \
+           git pull --rebase origin main && git push origin main)
 
       - name: Save database artifact
         uses: actions/upload-artifact@v4
