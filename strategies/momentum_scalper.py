@@ -225,13 +225,8 @@ class MomentumScalperStrategy:
         return opportunities
 
     async def _execute_trade(self, opp: Dict) -> bool:
-        """Execute trade. Arbs $5, Momentum $10, Value $10."""
-        if opp["side"] == "BOTH":
-            trade_size = 5.00  # Arbs: guaranteed profit
-        elif opp["type"].startswith("momentum"):
-            trade_size = 10.00  # High-conviction momentum plays
-        else:
-            trade_size = 10.00  # Value bets targeting 5x+ payout
+        """Execute trade. All trades $10 USD."""
+        trade_size = 10.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "momentum_scalper", opp["condition_id"])
         if not approved:

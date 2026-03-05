@@ -214,8 +214,8 @@ class CrossPlatformArbStrategy:
         return opportunities
 
     async def _execute_single_platform_arb(self, opp: Dict):
-        # AGGRESSIVE: $5 USD per arb (guaranteed profit, max size)
-        max_size = 2.50  # $2.50 per side = $5.00 total
+        # $10 USD per arb ($5 per side)
+        max_size = 5.00  # $5.00 per side = $10.00 total
 
         approved, reason = self.risk_manager.approve_trade(max_size, "cross_platform_arb", opp["condition_id"])
         if not approved:

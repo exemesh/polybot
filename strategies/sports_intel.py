@@ -553,7 +553,7 @@ class SportsIntelStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a sports/event trade. Arbs $5, Value $10."""
-        trade_size = 5.00 if opp["side"] == "BOTH" else 10.00  # $10 value bets for 5x+ payout
+        trade_size = 10.00  # $10 per trade across all types
 
         approved, reason = self.risk_manager.approve_trade(
             trade_size, "sports_intel", opp["condition_id"])
