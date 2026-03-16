@@ -37,7 +37,10 @@ class Settings:
     NOAA_API_TOKEN: str = field(default_factory=lambda: os.getenv("NOAA_API_TOKEN", ""))
     OPENMETEO_BASE_URL: str = "https://api.open-meteo.com/v1/forecast"
 
-    # ─── Telegram Alerts ────────────────────────────────────────────
+    # ─── Discord Alerts ─────────────────────────────────────────────
+    DISCORD_WEBHOOK_URL: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_URL", ""))
+
+    # ─── Telegram Alerts (DEPRECATED — use Discord instead) ─────────
     TELEGRAM_BOT_TOKEN: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
     TELEGRAM_REPORT_ENABLED: bool = True
@@ -46,10 +49,10 @@ class Settings:
     # AGGRESSIVE MODE: $100 paper trading, push to limits
     INITIAL_CAPITAL: float = field(default_factory=lambda: float(os.getenv("INITIAL_CAPITAL", "100")))
     MAX_POSITION_PCT: float = 0.20            # 20% per trade — room for $10 longshots
-    MAX_GLOBAL_EXPOSURE_PCT: float = 0.95     # 95% deployed — deploy nearly all capital
-    DAILY_LOSS_LIMIT_PCT: float = 0.30        # 30% daily loss tolerance — let it ride
-    MAX_SIMULTANEOUS_POSITIONS: int = 50      # Up to 50 positions — max volume
-    KELLY_FRACTION: float = 0.50              # 50% Kelly — full aggression
+    MAX_GLOBAL_EXPOSURE_PCT: float = 0.50     # 50% deployed — prudent risk management
+    DAILY_LOSS_LIMIT_PCT: float = 0.10        # 10% daily loss limit — protect capital
+    MAX_SIMULTANEOUS_POSITIONS: int = 15      # Up to 15 positions — focused portfolio
+    KELLY_FRACTION: float = 0.25              # 25% Kelly — true quarter-Kelly
 
     # ─── AI Superforecaster (from Polymarket/agents) ─────────────────
     OPENAI_API_KEY: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))

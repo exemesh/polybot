@@ -14,7 +14,9 @@ Runs as a single scan-and-trade cycle (designed for GitHub Actions cron).
 import argparse
 import asyncio
 import logging
+import sqlite3
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -35,8 +37,50 @@ from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
 from utils.logger import setup_logger
 from utils.telegram_alerts import TelegramAlerter
+from utils.discord_alerts import (
+    send_trade_alert,
+    send_pnl_update,
+    send_error_alert,
+    send_bot_status,
+)
 
 logger = setup_logger("polybot.main")
+
+
+def verify_db_integrity(db_path: str) -> tuple[bool, str]:
+    """Check that the SQLite database exists and is readable/not corrupted.
+
+    Returns:
+        (ok: bool, message: str)
+        ok=True  → DB is healthy, safe to trade.
+        ok=False → DB is missing or corrupted; caller should skip live trading.
+    """
+    path = Path(db_path)
+    if not path.exists():
+        msg = f"Database not found at {db_path} — will be created on first write"
+        logger.warning(msg)
+        # Not an error; portfolio will create it on _init_db()
+        return True, msg
+
+    try:
+        conn = sqlite3.connect(db_path)
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+        conn.close()
+        if result and result[0] == "ok":
+            logger.info(f"DB integrity check passed: {db_path}")
+            return True, "ok"
+        else:
+            msg = f"DB integrity_check returned: {result}"
+            logger.critical(f"CRITICAL: SQLite integrity check FAILED — {msg}")
+            return False, msg
+    except sqlite3.DatabaseError as exc:
+        msg = f"DB is corrupted or unreadable: {exc}"
+        logger.critical(f"CRITICAL: {msg}")
+        return False, msg
+    except Exception as exc:
+        msg = f"Unexpected DB check error: {exc}"
+        logger.critical(f"CRITICAL: {msg}")
+        return False, msg
 
 
 POLYGON_RPC_URLS = [
@@ -136,6 +180,14 @@ class PolyBot:
     def __init__(self, export_dashboard: bool = False):
         self.settings = Settings()
 
+        # ── DB integrity check at startup ──
+        db_ok, db_msg = verify_db_integrity(self.settings.DB_PATH)
+        self._db_skip_trading = not db_ok
+        if self._db_skip_trading:
+            logger.critical(
+                f"Skipping live trading this cycle due to DB integrity failure: {db_msg}"
+            )
+
         # ── Load control file (dashboard kill switch / mode toggle) ──
         self.control = load_control()
 
@@ -153,6 +205,7 @@ class PolyBot:
         self.portfolio = Portfolio(self.settings)
         self.risk_manager = RiskManager(self.settings, self.portfolio)
         self.alerter = TelegramAlerter(self.settings)
+        # Discord alerter functions are module-level; settings provide DISCORD_WEBHOOK_URL
         self.export_dashboard = export_dashboard
 
         # ── Apply emergency halt from control file ──
@@ -207,12 +260,27 @@ class PolyBot:
             logger.info(f"Wallet: Polymarket ${poly_cash:.2f} | On-chain ${on_chain:.2f} USDC | {balances['matic']:.4f} MATIC")
         self.portfolio.set_wallet_balances(balances)
 
+        mode_str = "DRY RUN" if self.settings.DRY_RUN else "LIVE"
+        portfolio_val = self.portfolio.get_portfolio_value()
+        open_count = len(self.portfolio.get_open_positions())
+
         await self.alerter.send(
             f"PolyBot scan started\n"
-            f"Mode: {'DRY RUN' if self.settings.DRY_RUN else 'LIVE'}\n"
-            f"Portfolio: ${self.portfolio.get_portfolio_value():.2f}\n"
+            f"Mode: {mode_str}\n"
+            f"Portfolio: ${portfolio_val:.2f}\n"
             f"Polymarket cash: ${balances.get('polymarket_cash', 0):.2f}"
         )
+        await send_bot_status(mode_str, portfolio_val, open_count)
+
+        # If DB is corrupted, skip all trading for this cycle
+        if self._db_skip_trading:
+            await send_error_alert(
+                "Database integrity check failed — skipping trading this cycle. "
+                "Check logs and restore DB from backup.",
+                "startup"
+            )
+            logger.critical("Aborting trading cycle due to DB integrity failure.")
+            return
 
         # Check if risk manager needs daily reset
         self.risk_manager.check_daily_reset()
@@ -239,6 +307,7 @@ class PolyBot:
                 await strategy.run_once()
             except Exception as e:
                 logger.error(f"Strategy {strategy.__class__.__name__} failed: {e}", exc_info=True)
+                await send_error_alert(str(e), strategy.__class__.__name__)
 
         # Take portfolio snapshot
         self.portfolio.snapshot()
@@ -258,6 +327,14 @@ class PolyBot:
         summary = self.portfolio.get_summary()
         logger.info(f"Scan complete:\n{summary}")
         await self.alerter.send(f"Scan complete\n{summary}")
+
+        # Send Discord PnL summary
+        await send_pnl_update(
+            total_pnl=self.portfolio.get_total_pnl(),
+            daily_pnl=self.portfolio.get_daily_pnl(),
+            win_rate=self.portfolio.get_win_rate(),
+            open_positions=len(self.portfolio.get_open_positions()),
+        )
 
         # ── Update control state ──
         self.control.last_bot_run = datetime.now(timezone.utc).isoformat()

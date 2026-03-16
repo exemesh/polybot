@@ -4,7 +4,7 @@ All trade sizes must be approved through this module.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, date, timezone
 
 logger = logging.getLogger("polybot.risk")
 
@@ -15,6 +15,7 @@ class RiskManager:
         self.portfolio = portfolio
         self._trading_halted = False
         self._halt_reason = None
+        self._last_reset_date: date = date.today()
 
     # ─── Trade Sizing ─────────────────────────────────────────────────────────
 
@@ -91,8 +92,15 @@ class RiskManager:
         return self._trading_halted
 
     def check_daily_reset(self):
-        """Called each hour to check if new trading day should reset the halt."""
-        hour = datetime.utcnow().hour
-        if hour == 0 and self._trading_halted and "Daily loss" in (self._halt_reason or ""):
-            self.resume_trading()
-            logger.info("Daily reset: trading resumed for new UTC day")
+        """Called each cycle to check if a new calendar day should reset the daily-loss halt.
+
+        Compares the date of the last reset against today's UTC date so that
+        a reset happens on *any* run that occurs on a new calendar day,
+        regardless of what hour the bot runs.
+        """
+        today = datetime.now(timezone.utc).date()
+        if self._last_reset_date < today:
+            self._last_reset_date = today
+            if self._trading_halted and "Daily loss" in (self._halt_reason or ""):
+                self.resume_trading()
+                logger.info(f"Daily reset: trading resumed for new UTC day ({today})")

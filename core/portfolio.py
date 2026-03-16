@@ -73,13 +73,34 @@ class Portfolio:
             return [dict(r) for r in rows]
 
     def has_open_position(self, market_id: str) -> bool:
-        """Check if we already have an open position in this market."""
+        """Check if we already have an open position in this market (by market_id)."""
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM trades WHERE market_id=? AND status='open'",
                 (market_id,)
             ).fetchone()
             return row[0] > 0
+
+    def has_open_position_by_token(self, token_id: str) -> bool:
+        """Check if we already have an open position for this specific token_id.
+
+        This is used for deduplication: before placing any new order, callers
+        should call this method and skip the order if it returns True.
+        Logs a warning when a duplicate is detected.
+        """
+        if not token_id:
+            return False
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE token_id=? AND status='open'",
+                (token_id,)
+            ).fetchone()
+            duplicate = row[0] > 0
+        if duplicate:
+            logger.warning(
+                f"Duplicate position skipped: token_id={token_id[:20]}... already has an open trade"
+            )
+        return duplicate
 
     def _get_conn(self):
         conn = sqlite3.connect(self.db_path)

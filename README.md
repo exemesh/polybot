@@ -27,10 +27,10 @@ Go to **Settings > Secrets and variables > Actions** and add:
 | `PRIVATE_KEY` | Yes | Polygon wallet private key (0x...) |
 | `DRY_RUN` | No | `true` (default) or `false` for live |
 | `INITIAL_CAPITAL` | No | Starting capital, default `100` |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | No | Your Telegram chat ID |
+| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for alerts |
 | `KALSHI_API_KEY` | No | For cross-platform arbitrage |
 | `KALSHI_API_SECRET` | No | For cross-platform arbitrage |
+| `OPENAI_API_KEY` | No | For AI forecaster strategy |
 
 ### 3. Enable GitHub Actions
 
@@ -64,9 +64,72 @@ GitHub Actions (cron every 10min)
 - 10% daily loss limit auto-halts trading
 - Starts in DRY_RUN mode (paper trading)
 
+## Mac mini Local Runner (Recommended)
+
+Running on a Mac mini gives you reliable 5-minute intervals (GitHub Actions free
+tier often delays by 20–60 minutes). The bot runs as a launchd service that
+starts on login and fires every 5 minutes.
+
+### Prerequisites
+
+- macOS 12+ (Monterey or later)
+- Python 3.11+ (`brew install python@3.11`)
+- The repo cloned to `~/polybot`
+
+### One-command setup
+
+```bash
+cd ~/polybot
+chmod +x scripts/setup_mac_mini.sh
+./scripts/setup_mac_mini.sh
+```
+
+This will:
+1. Create a virtual environment at `~/polybot-env`
+2. Install all Python requirements
+3. Create a `.env` file template at `~/polybot/.env`
+4. Install the launchd plist to `~/Library/LaunchAgents/`
+5. Load the service (bot starts running immediately)
+
+### Configure secrets
+
+Edit `~/polybot/.env` and fill in your values:
+
+```bash
+nano ~/polybot/.env
+```
+
+### Manage the service
+
+```bash
+# Stop the bot
+launchctl unload ~/Library/LaunchAgents/com.polybot.trader.plist
+
+# Start the bot
+launchctl load -w ~/Library/LaunchAgents/com.polybot.trader.plist
+
+# Run once manually (with live log output)
+./scripts/run_local.sh
+
+# Watch logs
+tail -f ~/polybot/logs/polybot.log
+```
+
+### Discord Alerts
+
+Set `DISCORD_WEBHOOK_URL` in your `.env` to receive real-time alerts:
+- Trade executions (rich embed with market, side, size, price, reason)
+- Daily PnL summaries (green/red embed based on profit/loss)
+- Error alerts (red embed with strategy name and error message)
+- Bot heartbeat (green for LIVE, yellow for DRY RUN)
+
+Create a webhook: Discord server → Channel settings → Integrations → Webhooks
+
+---
+
 ## Going Live
 
 1. Fund a Polygon wallet with $100 USDC
-2. Set `PRIVATE_KEY` secret to your wallet's private key
-3. Set `DRY_RUN` secret to `false`
-4. Monitor via dashboard and Telegram alerts
+2. Set `PRIVATE_KEY` in `~/.env` (local) or as a repository secret (GitHub Actions)
+3. Set `DRY_RUN=false`
+4. Monitor via dashboard and Discord alerts

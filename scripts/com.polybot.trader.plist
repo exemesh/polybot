@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    com.polybot.trader.plist — launchd configuration for PolyBot
+    Install location: ~/Library/LaunchAgents/com.polybot.trader.plist
+
+    The setup_mac_mini.sh script installs and loads this file automatically.
+    To install manually:
+        cp scripts/com.polybot.trader.plist ~/Library/LaunchAgents/
+        launchctl load -w ~/Library/LaunchAgents/com.polybot.trader.plist
+
+    To stop:
+        launchctl unload ~/Library/LaunchAgents/com.polybot.trader.plist
+
+    Placeholder POLYBOT_HOME_PLACEHOLDER is replaced by setup_mac_mini.sh with $HOME.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Unique label for this launchd job -->
+    <key>Label</key>
+    <string>com.polybot.trader</string>
+
+    <!-- Run at load (i.e. immediately when launchctl loads the plist) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Run every 300 seconds (5 minutes). Mac mini honors this precisely. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Do NOT restart automatically after exit (run-and-exit model) -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Working directory must exist -->
+    <key>WorkingDirectory</key>
+    <string>POLYBOT_HOME_PLACEHOLDER/polybot</string>
+
+    <!-- Command: activate venv and run main.py -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>POLYBOT_HOME_PLACEHOLDER/polybot-env/bin/python3</string>
+        <string>POLYBOT_HOME_PLACEHOLDER/polybot/main.py</string>
+        <string>--export-dashboard</string>
+    </array>
+
+    <!-- Load environment variables from .env file via EnviromentVariables.
+         Add all secrets from your .env here. launchd does NOT source shell
+         files, so variables must be listed explicitly.
+         The setup script reads .env and passes them — update this section
+         if you add new variables. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Path to the .env file is loaded by python-dotenv automatically
+             because main.py calls load_dotenv(). No shell sourcing needed.
+             We still set PATH so the venv python resolves system libs. -->
+        <key>PATH</key>
+        <string>POLYBOT_HOME_PLACEHOLDER/polybot-env/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>POLYBOT_HOME_PLACEHOLDER</string>
+        <!-- python-dotenv will load the .env file, so secrets stay in .env -->
+    </dict>
+
+    <!-- Standard output log (rotated by launchd) -->
+    <key>StandardOutPath</key>
+    <string>POLYBOT_HOME_PLACEHOLDER/polybot/logs/polybot.log</string>
+
+    <!-- Standard error log -->
+    <key>StandardErrorPath</key>
+    <string>POLYBOT_HOME_PLACEHOLDER/polybot/logs/polybot_error.log</string>
+</dict>
+</plist>
