@@ -1,13 +1,20 @@
 """
 Discord alert module for PolyBot.
-Sends trade notifications and portfolio reports via Discord webhooks.
 
-Requires DISCORD_WEBHOOK_URL environment variable to be set.
-If the variable is not set, all functions are silent no-ops.
+Two interfaces are provided:
+
+1. Module-level async functions (webhook-based, legacy):
+   - send_trade_alert / send_pnl_update / send_error_alert / send_bot_status
+   - Require DISCORD_WEBHOOK_URL environment variable.
+
+2. DiscordAlerts class (bot API-based, preferred for channel targeting):
+   - Uses Discord Bot Token via POST https://discord.com/api/v10/channels/{id}/messages
+   - Require DISCORD_BOT_TOKEN environment variable (or pass token directly).
+   - Methods: send_trade_alert / send_pnl_update / send_risk_alert / send_info
 
 Uses Discord embed format with colors:
   Green  (0x00C851) — profit / positive status
-  Red    (0xFF4444) — loss / error
+  Red    (0xFF4444) — loss / error / risk
   Blue   (0x007BFF) — informational
   Yellow (0xFFBB33) — neutral / warning
 """
@@ -25,6 +32,161 @@ COLOR_GREEN = 0x00C851
 COLOR_RED = 0xFF4444
 COLOR_BLUE = 0x007BFF
 COLOR_YELLOW = 0xFFBB33
+
+# Discord Bot API base URL
+DISCORD_API_BASE = "https://discord.com/api/v10"
+
+
+class DiscordAlerts:
+    """Send rich embed messages to specific Discord channels via the Bot API.
+
+    Usage:
+        alerts = DiscordAlerts()  # reads DISCORD_BOT_TOKEN from env
+        await alerts.send_trade_alert(channel_id, market, side, amount, price)
+
+    All methods are async and are silent no-ops when the bot token is not set.
+    """
+
+    def __init__(self, bot_token: str = ""):
+        self.bot_token = bot_token or os.getenv("DISCORD_BOT_TOKEN", "")
+        if self.bot_token:
+            logger.info("DiscordAlerts (bot API) enabled")
+        else:
+            logger.info("DiscordAlerts: DISCORD_BOT_TOKEN not set — alerts disabled")
+
+    # ── Internal helper ─────────────────────────────────────────────────────
+
+    async def _post_channel_message(self, channel_id: str, embed: dict) -> None:
+        """POST an embed to a Discord channel via the Bot API."""
+        if not self.bot_token or not channel_id:
+            return
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+        headers = {
+            "Authorization": f"Bot {self.bot_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {"embeds": [embed]}
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code not in (200, 201):
+                    logger.warning(
+                        f"Discord bot API returned {resp.status_code} for channel "
+                        f"{channel_id}: {resp.text[:200]}"
+                    )
+        except Exception as exc:
+            logger.warning(f"Discord bot API error: {exc}")
+
+    # ── Public methods ───────────────────────────────────────────────────────
+
+    async def send_trade_alert(
+        self,
+        channel_id: str,
+        market: str,
+        side: str,
+        amount: float,
+        price: float,
+    ) -> None:
+        """Send a trade execution alert to the specified channel.
+
+        Args:
+            channel_id: Discord channel snowflake ID string.
+            market:     Market question or description (truncated to 200 chars).
+            side:       Trade direction, e.g. "BUY_YES", "BUY_NO", "SELL".
+            amount:     Trade size in USD.
+            price:      Entry/exit price (0.0 – 1.0).
+        """
+        is_buy = "BUY" in side.upper()
+        color = COLOR_GREEN if is_buy else COLOR_BLUE
+        implied_prob = f"{price * 100:.1f}%"
+        embed = {
+            "title": f"Trade Executed — {side}",
+            "description": market[:200],
+            "color": color,
+            "fields": [
+                {"name": "Side", "value": side, "inline": True},
+                {"name": "Amount", "value": f"${amount:.2f}", "inline": True},
+                {"name": "Price", "value": f"{price:.4f} ({implied_prob})", "inline": True},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "PolyBot"},
+        }
+        await self._post_channel_message(channel_id, embed)
+
+    async def send_pnl_update(
+        self,
+        channel_id: str,
+        daily_pnl: float,
+        total_pnl: float,
+        win_rate: float,
+    ) -> None:
+        """Send a portfolio P&L summary to the specified channel.
+
+        Args:
+            channel_id: Discord channel snowflake ID string.
+            daily_pnl:  Today's realized P&L in USD.
+            total_pnl:  All-time realized P&L in USD.
+            win_rate:   Win rate as a percentage (0–100).
+        """
+        color = COLOR_GREEN if total_pnl >= 0 else COLOR_RED
+        total_sign = "+" if total_pnl >= 0 else ""
+        daily_sign = "+" if daily_pnl >= 0 else ""
+        embed = {
+            "title": "Portfolio PnL Update",
+            "color": color,
+            "fields": [
+                {
+                    "name": "Total PnL",
+                    "value": f"{total_sign}${total_pnl:.2f}",
+                    "inline": True,
+                },
+                {
+                    "name": "Today's PnL",
+                    "value": f"{daily_sign}${daily_pnl:.2f}",
+                    "inline": True,
+                },
+                {
+                    "name": "Win Rate",
+                    "value": f"{win_rate:.1f}%",
+                    "inline": True,
+                },
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "PolyBot"},
+        }
+        await self._post_channel_message(channel_id, embed)
+
+    async def send_risk_alert(self, channel_id: str, message: str) -> None:
+        """Send a red risk/warning alert to the specified channel.
+
+        Args:
+            channel_id: Discord channel snowflake ID string.
+            message:    Risk alert message (truncated to 1000 chars).
+        """
+        embed = {
+            "title": "Risk Alert",
+            "description": message[:1000],
+            "color": COLOR_RED,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "PolyBot — Risk Manager"},
+        }
+        await self._post_channel_message(channel_id, embed)
+
+    async def send_info(self, channel_id: str, message: str) -> None:
+        """Send a blue informational message to the specified channel.
+
+        Args:
+            channel_id: Discord channel snowflake ID string.
+            message:    Informational message (truncated to 1000 chars).
+        """
+        embed = {
+            "title": "PolyBot Info",
+            "description": message[:1000],
+            "color": COLOR_BLUE,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "PolyBot"},
+        }
+        await self._post_channel_message(channel_id, embed)
 
 
 def _get_webhook_url() -> str:

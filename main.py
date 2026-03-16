@@ -302,9 +302,21 @@ class PolyBot:
             logger.error(f"Profit taker failed: {e}", exc_info=True)
 
         # Run each strategy's single scan
+        # Fetch open position token IDs once and pass to each strategy so they
+        # can skip markets where a position already exists (deduplication).
+        open_token_ids = set(self.portfolio.get_open_token_ids())
+        logger.info(f"Position deduplication: {len(open_token_ids)} open token IDs loaded")
+
         for strategy in self.strategies:
             try:
-                await strategy.run_once()
+                # Inject the current set of open token IDs if the strategy
+                # accepts it, otherwise fall back to the no-arg call.
+                try:
+                    await strategy.run_once(open_token_ids=open_token_ids)
+                except TypeError:
+                    await strategy.run_once()
+                # Refresh after each strategy so the next one sees new positions
+                open_token_ids = set(self.portfolio.get_open_token_ids())
             except Exception as e:
                 logger.error(f"Strategy {strategy.__class__.__name__} failed: {e}", exc_info=True)
                 await send_error_alert(str(e), strategy.__class__.__name__)

@@ -45,7 +45,7 @@ class Portfolio:
         self.initial_capital = settings.INITIAL_CAPITAL
         self.db_path = settings.DB_PATH
         self._wallet_balances = {"matic": 0.0, "usdc": 0.0, "error": None}
-        self._init_db()
+        self._init_db_safe()
 
     def set_wallet_balances(self, balances: dict):
         """Store on-chain wallet balances from latest check."""
@@ -102,10 +102,58 @@ class Portfolio:
             )
         return duplicate
 
+    def get_open_token_ids(self) -> list:
+        """Return a list of token_ids for all currently open positions.
+
+        Used for position deduplication: strategies should skip any market
+        whose token_id already appears in this list.
+        """
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT token_id FROM trades WHERE status='open' AND token_id IS NOT NULL"
+                ).fetchall()
+                return [r["token_id"] for r in rows if r["token_id"]]
+        except sqlite3.DatabaseError as exc:
+            logger.warning(f"get_open_token_ids DB error: {exc}")
+            return []
+
     def _get_conn(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _init_db_safe(self):
+        """Initialize the database with graceful recovery on corruption.
+
+        If the DB file is missing, a fresh one is created automatically.
+        If the DB file exists but is corrupted (sqlite3.DatabaseError),
+        a warning is logged and the file is replaced with a fresh DB so the
+        bot can continue operating rather than crashing.
+        """
+        db_path = Path(self.db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if db_path.exists():
+            try:
+                # Quick integrity probe before init
+                conn = sqlite3.connect(str(db_path))
+                result = conn.execute("PRAGMA integrity_check").fetchone()
+                conn.close()
+                if result and result[0] != "ok":
+                    raise sqlite3.DatabaseError(
+                        f"integrity_check returned: {result[0]}"
+                    )
+            except sqlite3.DatabaseError as exc:
+                logger.warning(
+                    f"DB at {self.db_path} is corrupted ({exc}). "
+                    "Renaming to .bak and initialising a fresh database."
+                )
+                bak_path = str(db_path) + ".bak"
+                db_path.rename(bak_path)
+                logger.warning(f"Corrupt DB backed up to {bak_path}")
+
+        self._init_db()
 
     def _init_db(self):
         with self._get_conn() as conn:

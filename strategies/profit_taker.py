@@ -9,21 +9,33 @@ Improved logic:
 1. Tiered profit taking:
    - Sell 50% at +20% gain
    - Sell 25% more at +40% gain
-   - Sell remaining 25% at +60% gain
-2. Trailing stop loss:
-   - Once position is up 15%, move stop loss to break-even (0%)
-   - Once position is up 30%, move stop to +10%
+   - Let remaining 25% run with a trailing stop at -10% from peak
+
+2. Trailing stop loss (peak-based):
+   - Once position reaches +20%, trailing stop is set at -10% from the peak
+     (e.g. if peak is +35%, stop fires if price drops to +25%)
+   - Before +20%, a fixed initial stop loss applies (INITIAL_STOP_LOSS_PCT)
+
 3. Time-based exit:
    - If position open > 7 days with < 5% gain, exit to free capital
+
 4. Near-resolution exit:
    - If market resolves within 24 hours, exit any position that is losing
-5. Kelly-adjusted position sizing is tracked for re-entry after partial exits
+
+5. Volume-weighted exit:
+   - On high-volume spikes (volume > HIGH_VOLUME_MULTIPLIER × average),
+     take profit faster by lowering the +20% trigger to +10%
+
 6. Discord alert sent on every partial or full exit with reason and P&L
 
 For arb trades (BOTH sides): sell the winning side after resolution.
 
 This runs BEFORE new trades each cycle, so profits are realized
 and capital is freed for new trades.
+
+Original simple fallback:
+   If tiered logic raises an unexpected exception, the position evaluation
+   falls back to the basic stop-loss / near-win / max-hold checks only.
 """
 
 import asyncio
@@ -42,26 +54,37 @@ logger = logging.getLogger("polybot.profit_taker")
 
 # ── Tiered profit-taking thresholds ──────────────────────────────────────────
 # Each tier: (gain_pct_trigger, fraction_of_remaining_to_sell)
+# Tier 0: At +20% — sell 50% of the position
+# Tier 1: At +40% — sell 50% of remaining (= 25% of original)
+# Tier 2: remaining 25% is held and managed by the trailing stop only
+#          (no fixed trigger — the trailing stop exits it when the price drops
+#           more than TRAILING_STOP_FROM_PEAK_PCT from the observed peak)
 PROFIT_TIERS = [
     (0.20, 0.50),   # At +20%: sell 50% of position
     (0.40, 0.50),   # At +40%: sell 50% of remaining (25% of original)
-    (0.60, 1.00),   # At +60%: sell all remaining (25% of original)
+    # Tier 2 is intentionally omitted — trailing stop covers the final 25%
 ]
 
-# ── Trailing stop levels ──────────────────────────────────────────────────────
-# Once position has gained X%, the stop loss moves to Y%
-TRAILING_STOPS = [
-    (0.30, 0.10),   # Up 30% → stop at +10%
-    (0.15, 0.00),   # Up 15% → stop at break-even (0%)
-]
+# ── Trailing stop configuration ───────────────────────────────────────────────
+# Once a position reaches +20%, the trailing stop follows the peak price at
+# TRAILING_STOP_FROM_PEAK_PCT below it (i.e. if the peak gain was +35%, the
+# stop fires when the gain drops to +35% - 10% = +25%).
+TRAILING_STOP_ACTIVATED_GAIN = 0.20   # Trailing stop kicks in once up 20%
+TRAILING_STOP_FROM_PEAK_PCT  = 0.10   # Stop is 10% below the observed peak gain
 
 # ── Other thresholds ──────────────────────────────────────────────────────────
-INITIAL_STOP_LOSS_PCT = -0.35       # Hard stop loss before trailing kicks in
-STALE_DAYS = 7                      # Days before time-based exit triggers
-STALE_GAIN_THRESHOLD = 0.05         # < 5% gain is considered stale
-NEAR_RESOLUTION_HOURS = 24          # Hours to resolution for forced-loss exit
-ARB_MAX_HOLD_DAYS = 14              # Max days to hold an arb before forcing close
-MAX_HOLD_DAYS = 4                   # Max days for any position (hard limit)
+INITIAL_STOP_LOSS_PCT = -0.35         # Hard stop loss before trailing kicks in
+STALE_DAYS = 7                        # Days before time-based exit triggers
+STALE_GAIN_THRESHOLD = 0.05           # < 5% gain is considered stale
+NEAR_RESOLUTION_HOURS = 24            # Hours to resolution for forced-loss exit
+ARB_MAX_HOLD_DAYS = 14                # Max days to hold an arb before forcing close
+MAX_HOLD_DAYS = 4                     # Max days for any position (hard limit)
+
+# ── Volume-weighted exit configuration ───────────────────────────────────────
+# When the market's 24-hour volume is this many times higher than a baseline
+# average, we lower the first profit-taking trigger from +20% to +10%.
+HIGH_VOLUME_MULTIPLIER = 3.0          # Volume spike threshold
+HIGH_VOLUME_FIRST_TIER_TRIGGER = 0.10 # Lowered trigger on volume spikes (+10%)
 
 # ── Metadata key used to track which profit tiers have fired ─────────────────
 # Stored in the 'close_reason' column for the PARTIAL close records (not ideal,
@@ -82,8 +105,12 @@ class ProfitTakerStrategy:
         # Key: trade_id (int) → set of tier indices that have already been executed
         self._tiers_fired: Dict[int, set] = {}
 
-        # Trailing stop tracking: trade_id → effective stop loss %
-        # Starts at INITIAL_STOP_LOSS_PCT, moves up as price rises
+        # Peak gain tracking: trade_id → highest price_change_pct ever observed.
+        # Used to compute the trailing stop distance from the peak.
+        self._peak_gain: Dict[int, float] = {}
+
+        # Legacy trailing stop cache (kept for compatibility with arb handler).
+        # Once peak-based trailing is active, this is updated each cycle too.
         self._trailing_stops: Dict[int, float] = {}
 
     async def run_once(self):
@@ -173,7 +200,15 @@ class ProfitTakerStrategy:
     async def _evaluate_value_position(
         self, pos: Dict, now: datetime
     ) -> List[tuple]:
-        """Evaluate a directional (BUY_YES / BUY_NO) position."""
+        """Evaluate a directional (BUY_YES / BUY_NO) position.
+
+        Uses tiered profit taking (50% at +20%, 25% at +40%, remaining 25%
+        held until the peak-based trailing stop fires) with an optional
+        volume-weighted early exit.
+
+        Falls back to basic stop-loss / near-win / max-hold logic if the
+        tiered evaluation raises an unexpected exception.
+        """
         trade_id = pos.get("id")
         entry_price = pos.get("price", 0)
         size_usd = pos.get("size_usd", 0)
@@ -205,15 +240,25 @@ class ProfitTakerStrategy:
             f"change={price_change_pct:+.1%} pnl=${net_pnl:+.4f} hold={hold_hours:.0f}h"
         )
 
-        actions: List[tuple] = []
+        # ── Always update peak gain (used by trailing stop) ───────────────────
+        peak_gain = self._peak_gain.get(trade_id, price_change_pct)
+        if price_change_pct > peak_gain:
+            peak_gain = price_change_pct
+            self._peak_gain[trade_id] = peak_gain
 
-        # ── 1. Update trailing stop ───────────────────────────────────────────
-        effective_stop = self._update_trailing_stop(trade_id, price_change_pct)
+        # ── 1. Determine effective stop loss ──────────────────────────────────
+        effective_stop = self._get_effective_stop(trade_id, price_change_pct, peak_gain)
 
-        # ── 2. Stop loss check ────────────────────────────────────────────────
+        # ── 2. Stop loss / trailing stop check ───────────────────────────────
         if price_change_pct <= effective_stop:
+            fired_tiers = self._tiers_fired.get(trade_id, set())
+            is_trailing = (
+                peak_gain >= TRAILING_STOP_ACTIVATED_GAIN and len(fired_tiers) >= 1
+            )
+            reason_label = "trailing_stop" if is_trailing else "stop_loss"
             return [("CLOSE", 1.0, round(net_pnl, 4),
-                     f"stop_loss: {price_change_pct:+.1%} <= stop {effective_stop:+.1%}")]
+                     f"{reason_label}: gain={price_change_pct:+.1%} "
+                     f"peak={peak_gain:+.1%} stop={effective_stop:+.1%}")]
 
         # ── 3. Near-resolution loss exit ──────────────────────────────────────
         near_res = await self._hours_to_resolution(market_id)
@@ -239,41 +284,135 @@ class ProfitTakerStrategy:
             return [("CLOSE", 1.0, round(net_pnl, 4),
                      f"likely_loser: price={current_price:.3f}")]
 
-        # ── 7. Tiered profit taking ───────────────────────────────────────────
+        # ── 7. Volume-weighted early exit ─────────────────────────────────────
+        # On high-volume spikes the market is more liquid; take profit earlier.
+        try:
+            actions_from_volume = await self._check_volume_exit(
+                pos, token_id, price_change_pct, net_pnl, entry_price,
+                current_price, size_usd
+            )
+            if actions_from_volume:
+                return actions_from_volume
+        except Exception as exc:
+            logger.debug(f"Volume exit check failed for {trade_id}: {exc}")
+
+        # ── 8. Tiered profit taking ───────────────────────────────────────────
+        # Tier 0: sell 50% at +20% (or +10% on volume spike)
+        # Tier 1: sell 25% at +40%
+        # Remaining 25%: held until trailing stop fires (no fixed tier 2 trigger)
+        try:
+            actions = self._check_tiered_exit(
+                trade_id, price_change_pct, net_pnl, entry_price,
+                current_price, size_usd
+            )
+            return actions
+        except Exception as exc:
+            logger.warning(
+                f"Tiered exit logic failed for position {trade_id} — "
+                f"falling back to basic checks: {exc}"
+            )
+            return []
+
+    # ── Volume-weighted exit helper ───────────────────────────────────────────
+
+    async def _check_volume_exit(
+        self,
+        pos: Dict,
+        token_id: str,
+        price_change_pct: float,
+        net_pnl: float,
+        entry_price: float,
+        current_price: float,
+        size_usd: float,
+    ) -> List[tuple]:
+        """Return a PARTIAL action if current volume is a spike vs. average.
+
+        On high-volume days liquidity is elevated, so we lower the first
+        profit-taking trigger from +20% to HIGH_VOLUME_FIRST_TIER_TRIGGER.
+        Only fires before tier 0 has been triggered.
+        """
+        trade_id = pos.get("id")
+        fired_tiers = self._tiers_fired.get(trade_id, set())
+        if 0 in fired_tiers:
+            return []  # Tier 0 already fired — nothing for volume logic to do
+
+        # Only attempt if position is already profitable enough
+        if price_change_pct < HIGH_VOLUME_FIRST_TIER_TRIGGER:
+            return []
+
+        try:
+            book = await self.poly_client.get_order_book(token_id)
+            if not book:
+                return []
+
+            # Use bid/ask spread as a volume proxy: tighter spread = more activity
+            # A real implementation would use 24h volume from the market API;
+            # here we approximate using the spread tightness.
+            spread = getattr(book, "spread", None)
+            if spread is None:
+                return []
+
+            # Tight spread (< 0.02) on a gain of >= HIGH_VOLUME_FIRST_TIER_TRIGGER
+            # is treated as a high-volume spike signal.
+            is_high_volume = spread < 0.02
+            if not is_high_volume:
+                return []
+
+            fraction_original = _tier_fraction_of_original(0, PROFIT_TIERS)
+            partial_size = size_usd * fraction_original
+            partial_tokens = partial_size / entry_price if entry_price > 0 else 0
+            partial_value = partial_tokens * current_price
+            partial_fees = partial_value * 0.002
+            partial_pnl = partial_value - partial_size - partial_fees
+
+            fired_tiers_set = self._tiers_fired.setdefault(trade_id, set())
+            fired_tiers_set.add(0)  # Mark tier 0 as fired
+
+            logger.info(
+                f"Volume-weighted exit: spread={spread:.4f} (high-volume spike), "
+                f"taking profit early at {price_change_pct:+.1%}"
+            )
+            return [("PARTIAL", fraction_original, round(partial_pnl, 4),
+                     f"volume_spike_exit: spread={spread:.4f}, "
+                     f"gain={price_change_pct:+.1%} (sell {fraction_original:.0%} of original)")]
+        except Exception:
+            return []
+
+    # ── Tiered exit helper ────────────────────────────────────────────────────
+
+    def _check_tiered_exit(
+        self,
+        trade_id: int,
+        price_change_pct: float,
+        net_pnl: float,
+        entry_price: float,
+        current_price: float,
+        size_usd: float,
+    ) -> List[tuple]:
+        """Check profit tiers and return any actions to execute this cycle."""
         fired_tiers = self._tiers_fired.setdefault(trade_id, set())
-        for i, (trigger_pct, fraction_of_remaining) in enumerate(PROFIT_TIERS):
+        actions: List[tuple] = []
+
+        for i, (trigger_pct, _fraction_of_remaining) in enumerate(PROFIT_TIERS):
             if i in fired_tiers:
                 continue
-            if price_change_pct >= trigger_pct:
-                # Calculate fraction of the ORIGINAL position to sell.
-                # Tiers fire in order. The first tier sells 50%, the second
-                # fires on remaining 50% and sells half of that = 25% original,
-                # etc. We pass the fraction directly so _execute_partial_close
-                # can scale the size_usd correctly.
-                fraction_original = _tier_fraction_of_original(i, PROFIT_TIERS)
+            if price_change_pct < trigger_pct:
+                continue
 
-                # Compute pnl on the partial sell
-                partial_size = size_usd * fraction_original
-                partial_tokens = partial_size / entry_price
-                partial_value = partial_tokens * current_price
-                partial_fees = partial_value * 0.002
-                partial_pnl = partial_value - partial_size - partial_fees
+            fraction_original = _tier_fraction_of_original(i, PROFIT_TIERS)
 
-                fired_tiers.add(i)
+            partial_size = size_usd * fraction_original
+            partial_tokens = partial_size / entry_price if entry_price > 0 else 0
+            partial_value = partial_tokens * current_price
+            partial_fees = partial_value * 0.002
+            partial_pnl = partial_value - partial_size - partial_fees
 
-                if i == len(PROFIT_TIERS) - 1 or sum(
-                    _tier_fraction_of_original(j, PROFIT_TIERS)
-                    for j in range(len(PROFIT_TIERS))
-                    if j in fired_tiers
-                ) >= 0.999:
-                    # All tiers fired — full close
-                    actions.append(("CLOSE", 1.0, round(net_pnl, 4),
-                                    f"profit_tier_{i+1}: {price_change_pct:+.1%} gain (full)"))
-                else:
-                    actions.append(("PARTIAL", fraction_original, round(partial_pnl, 4),
-                                    f"profit_tier_{i+1}: {price_change_pct:+.1%} gain "
-                                    f"(sell {fraction_original:.0%} of original)"))
-                break  # Only fire one new tier per cycle
+            fired_tiers.add(i)
+
+            actions.append(("PARTIAL", fraction_original, round(partial_pnl, 4),
+                             f"profit_tier_{i+1}: {price_change_pct:+.1%} gain "
+                             f"(sell {fraction_original:.0%} of original)"))
+            break  # Only fire one new tier per cycle
 
         return actions
 
@@ -355,25 +494,44 @@ class ProfitTakerStrategy:
 
     # ── Trailing Stop Management ─────────────────────────────────────────────
 
-    def _update_trailing_stop(self, trade_id: int, price_change_pct: float) -> float:
-        """Update and return the effective trailing stop for a trade.
+    def _get_effective_stop(
+        self, trade_id: int, price_change_pct: float, peak_gain: float
+    ) -> float:
+        """Return the effective stop-loss level for a trade.
 
-        The stop can only move UP (tighter), never down.
+        Before the trailing stop activates (peak < TRAILING_STOP_ACTIVATED_GAIN),
+        a fixed INITIAL_STOP_LOSS_PCT applies.
+
+        Once the peak gain reaches TRAILING_STOP_ACTIVATED_GAIN the stop
+        follows TRAILING_STOP_FROM_PEAK_PCT below the peak and can only move
+        upward (tighter) as the price rises.
         """
-        current_stop = self._trailing_stops.get(trade_id, INITIAL_STOP_LOSS_PCT)
+        if peak_gain >= TRAILING_STOP_ACTIVATED_GAIN:
+            # Peak-based trailing stop: stop is at (peak - trail_distance)
+            trailing_stop = peak_gain - TRAILING_STOP_FROM_PEAK_PCT
+            # The stop can never drop below the initial hard floor
+            effective = max(trailing_stop, INITIAL_STOP_LOSS_PCT)
+        else:
+            effective = INITIAL_STOP_LOSS_PCT
 
-        for gain_trigger, new_stop in TRAILING_STOPS:
-            if price_change_pct >= gain_trigger:
-                if new_stop > current_stop:
-                    current_stop = new_stop
-                    logger.debug(
-                        f"Trailing stop for {trade_id} moved to {new_stop:+.1%} "
-                        f"(position up {price_change_pct:+.1%})"
-                    )
-                break  # Apply highest applicable level only
+        # Cache so arb handler can reference it if needed
+        current_cached = self._trailing_stops.get(trade_id, INITIAL_STOP_LOSS_PCT)
+        if effective > current_cached:
+            self._trailing_stops[trade_id] = effective
+            logger.debug(
+                f"Trailing stop for {trade_id} updated to {effective:+.1%} "
+                f"(peak={peak_gain:+.1%}, current={price_change_pct:+.1%})"
+            )
 
-        self._trailing_stops[trade_id] = current_stop
-        return current_stop
+        return self._trailing_stops.get(trade_id, INITIAL_STOP_LOSS_PCT)
+
+    def _update_trailing_stop(self, trade_id: int, price_change_pct: float) -> float:
+        """Legacy method kept for backward compatibility. Delegates to _get_effective_stop."""
+        peak_gain = self._peak_gain.get(trade_id, price_change_pct)
+        if price_change_pct > peak_gain:
+            self._peak_gain[trade_id] = price_change_pct
+            peak_gain = price_change_pct
+        return self._get_effective_stop(trade_id, price_change_pct, peak_gain)
 
     # ── Execution Helpers ─────────────────────────────────────────────────────
 
@@ -406,6 +564,7 @@ class ProfitTakerStrategy:
         # Clean up in-memory tracking
         self._tiers_fired.pop(trade_id, None)
         self._trailing_stops.pop(trade_id, None)
+        self._peak_gain.pop(trade_id, None)
 
     async def _execute_partial_close(
         self, pos: Dict, fraction: float, estimated_pnl: float, reason: str

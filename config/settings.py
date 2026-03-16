@@ -39,6 +39,10 @@ class Settings:
 
     # ─── Discord Alerts ─────────────────────────────────────────────
     DISCORD_WEBHOOK_URL: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_URL", ""))
+    DISCORD_BOT_TOKEN: str = field(default_factory=lambda: os.getenv("DISCORD_BOT_TOKEN", ""))
+    DISCORD_TRADE_CHANNEL_ID: str = field(default_factory=lambda: os.getenv("DISCORD_TRADE_CHANNEL_ID", ""))
+    DISCORD_ALERT_CHANNEL_ID: str = field(default_factory=lambda: os.getenv("DISCORD_ALERT_CHANNEL_ID", ""))
+    DISCORD_ANALYST_CHANNEL_ID: str = field(default_factory=lambda: os.getenv("DISCORD_ANALYST_CHANNEL_ID", ""))
 
     # ─── Telegram Alerts (DEPRECATED — use Discord instead) ─────────
     TELEGRAM_BOT_TOKEN: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
