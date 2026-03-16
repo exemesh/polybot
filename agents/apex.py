@@ -1,5 +1,5 @@
 """
-Apex Coordinator — Runs Scout, Analyst, and Guardian agents in parallel.
+Apex Coordinator — Runs Recon, Blaze, Sage, and Sentinel agents in parallel.
 """
 
 import asyncio
@@ -41,7 +41,7 @@ async def _send_startup_message(discord: DiscordAlerts) -> None:
             "title": "Apex Coordinator Online",
             "description": (
                 f"Agent swarm starting at {ts}.\n"
-                f"Scout, Analyst, and Guardian are launching in parallel."
+                f"Recon, Blaze, Sage, and Sentinel are launching in parallel."
             ),
             "color": COLOR_BLUE,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -58,8 +58,8 @@ async def run_apex() -> None:
     """
     Main coordinator entry point.
 
-    Sends a startup message to all four channels, then runs Scout, Analyst,
-    and Guardian concurrently via asyncio.gather(). Each agent is wrapped so
+    Sends a startup message to all four channels, then runs Recon, Sage,
+    and Sentinel concurrently via asyncio.gather(). Each agent is wrapped so
     its failure cannot crash the other agents.
     """
     logger.info("Apex coordinator starting...")
@@ -80,9 +80,9 @@ async def run_apex() -> None:
 
     # Run all three agents in parallel
     await asyncio.gather(
-        _run_agent("Scout", run_scout()),
-        _run_agent("Analyst", run_analyst()),
-        _run_agent("Guardian", run_guardian()),
+        _run_agent("Recon", run_scout()),
+        _run_agent("Sage", run_analyst()),
+        _run_agent("Sentinel", run_guardian()),
         return_exceptions=True,  # Never propagate — Apex itself should not crash
     )
 

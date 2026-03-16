@@ -1,18 +1,14 @@
 """
-Analyst Agent — Combined P&L reports (Binance + Polymarket DB) → #analyst-dashboard
+Sage Agent — Daily Polymarket P&L report → #analyst-dashboard
+Posts once daily at 8AM UTC only.
 """
 
 import asyncio
-import hashlib
-import hmac
+import json
 import logging
 import os
 import sqlite3
-import time
-import urllib.parse
 from datetime import datetime, timezone, timedelta
-
-import httpx
 
 from utils.discord_alerts import DiscordAlerts
 
@@ -20,62 +16,34 @@ logger = logging.getLogger("polybot.analyst")
 
 ANALYST_CHANNEL = "1483029691689341110"
 
-BINANCE_SPOT_URL = "https://api.binance.com"
-BINANCE_FUTURES_URL = "https://fapi.binance.com"
-
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "polybot.db")
 
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+LAST_POST_PATH = os.path.join(DATA_DIR, "analyst_last_post.json")
 
-def _binance_sign(params: dict, secret: str) -> str:
-    query = urllib.parse.urlencode(params)
-    sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-    return query + "&signature=" + sig
+# Only post at this UTC hour
+POST_HOUR_UTC = 8
 
 
-async def fetch_binance_balance(api_key: str, secret: str) -> dict:
-    """Fetch combined Binance portfolio value."""
-    result = {"usdt_balance": 0.0, "total_usd": 0.0, "futures_wallet": 0.0}
-    if not api_key or not secret:
-        return result
+def _load_last_post() -> str | None:
+    """Return the ISO date string of the last post, or None."""
+    try:
+        if os.path.exists(LAST_POST_PATH):
+            with open(LAST_POST_PATH) as f:
+                return json.load(f).get("last_post_date")
+    except Exception as exc:
+        logger.warning(f"Failed to load last post timestamp: {exc}")
+    return None
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        # Spot account
-        ts = int(time.time() * 1000)
-        qs = _binance_sign({"timestamp": ts}, secret)
-        try:
-            resp = await client.get(
-                f"{BINANCE_SPOT_URL}/api/v3/account?{qs}",
-                headers={"X-MBX-APIKEY": api_key},
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                account = resp.json()
-                for b in account.get("balances", []):
-                    if b["asset"] == "USDT":
-                        result["usdt_balance"] = float(b["free"]) + float(b["locked"])
-                    elif b["asset"] == "USDC":
-                        result["usdt_balance"] += float(b["free"]) + float(b["locked"])
-        except Exception as exc:
-            logger.warning(f"Binance spot balance fetch failed: {exc}")
 
-        # Futures wallet balance
-        ts = int(time.time() * 1000)
-        qs = _binance_sign({"timestamp": ts}, secret)
-        try:
-            resp2 = await client.get(
-                f"{BINANCE_FUTURES_URL}/fapi/v2/balance?{qs}",
-                headers={"X-MBX-APIKEY": api_key},
-                timeout=15,
-            )
-            if resp2.status_code == 200:
-                for wallet in resp2.json():
-                    if wallet.get("asset") in ("USDT", "USDC"):
-                        result["futures_wallet"] += float(wallet.get("balance", 0))
-        except Exception as exc:
-            logger.warning(f"Binance futures balance fetch failed: {exc}")
-
-    result["total_usd"] = result["usdt_balance"] + result["futures_wallet"]
-    return result
+def _save_last_post(date_str: str) -> None:
+    """Persist today's date as last post date."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(LAST_POST_PATH, "w") as f:
+            json.dump({"last_post_date": date_str, "updated_at": datetime.now(timezone.utc).isoformat()}, f)
+    except Exception as exc:
+        logger.warning(f"Failed to save last post timestamp: {exc}")
 
 
 def fetch_trade_stats_from_db(db_path: str) -> dict:
@@ -104,10 +72,8 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Detect available tables
         tables = {r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
-        # Look for a trades or positions table
         trade_table = None
         for candidate in ("trades", "positions", "closed_positions"):
             if candidate in tables:
@@ -119,7 +85,6 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             conn.close()
             return stats
 
-        # Fetch all closed/resolved trades
         try:
             rows = cur.execute(
                 f"SELECT * FROM {trade_table} WHERE status IN ('resolved','closed','won','lost') "
@@ -143,7 +108,6 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             strategy = d.get("strategy", d.get("strategy_name", "unknown"))
             strategy_map.setdefault(strategy, []).append(pnl)
 
-            # Parse timestamp
             ts_raw = d.get("created_at") or d.get("closed_at") or d.get("resolved_at") or ""
             try:
                 if ts_raw:
@@ -166,7 +130,6 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
         stats["worst_trade"] = min(profits) if profits else 0.0
         stats["total_pnl"] = sum(profits)
 
-        # Strategy breakdown
         for strat, pnls in strategy_map.items():
             stats["strategy_stats"][strat] = {
                 "count": len(pnls),
@@ -194,41 +157,36 @@ def _ascii_bar(value: float, max_val: float, width: int = 12) -> str:
 
 
 async def run_analyst() -> None:
-    """Main Analyst agent: compile stats and post to #analyst-dashboard."""
-    logger.info("Analyst agent starting...")
+    """Main Sage agent: compile Polymarket stats and post once daily at 8AM UTC."""
+    logger.info("Sage agent starting...")
 
-    api_key = os.getenv("BINANCE_API_KEY", "")
-    secret = os.getenv("BINANCE_SECRET_KEY", "")
+    now = datetime.now(timezone.utc)
+    current_hour = now.hour
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Only post at 8AM UTC
+    if current_hour != POST_HOUR_UTC:
+        logger.info(f"Sage: current UTC hour is {current_hour}, not {POST_HOUR_UTC} — skipping post.")
+        return
+
+    # Only post once per day
+    last_post_date = _load_last_post()
+    if last_post_date == today_str:
+        logger.info(f"Sage: already posted today ({today_str}) — skipping.")
+        return
+
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
     discord = DiscordAlerts(bot_token=bot_token)
 
-    binance_bal, db_stats = await asyncio.gather(
-        fetch_binance_balance(api_key, secret),
-        asyncio.to_thread(fetch_trade_stats_from_db, DB_PATH),
-        return_exceptions=True,
-    )
+    db_stats = await asyncio.to_thread(fetch_trade_stats_from_db, DB_PATH)
 
-    if isinstance(binance_bal, Exception):
-        logger.error(f"Binance balance failed: {binance_bal}")
-        binance_bal = {"usdt_balance": 0.0, "futures_wallet": 0.0, "total_usd": 0.0}
     if isinstance(db_stats, Exception):
         logger.error(f"DB stats failed: {db_stats}")
         db_stats = {"error": str(db_stats), "total_trades": 0}
 
-    binance_total = binance_bal.get("total_usd", 0.0)
     poly_pnl = db_stats.get("total_pnl", 0.0)
 
-    # Portfolio value section
     fields = [
-        {
-            "name": "Binance Portfolio",
-            "value": (
-                f"Spot: ${binance_bal.get('usdt_balance', 0):.2f}\n"
-                f"Futures: ${binance_bal.get('futures_wallet', 0):.2f}\n"
-                f"Total: ${binance_total:.2f}"
-            ),
-            "inline": True,
-        },
         {
             "name": "Polymarket P&L",
             "value": (
@@ -240,7 +198,6 @@ async def run_analyst() -> None:
         },
     ]
 
-    # Trade statistics
     if db_stats.get("error"):
         fields.append({
             "name": "Trade Statistics",
@@ -266,7 +223,6 @@ async def run_analyst() -> None:
             "inline": False,
         })
 
-    # Strategy performance
     strategy_stats = db_stats.get("strategy_stats", {})
     if strategy_stats:
         sorted_strats = sorted(strategy_stats.items(), key=lambda x: x[1]["total"], reverse=True)
@@ -294,7 +250,6 @@ async def run_analyst() -> None:
                 "inline": False,
             })
 
-    # Daily P&L ASCII chart (last 7 days — placeholder, real breakdown needs more DB query)
     daily = db_stats.get("daily_pnl", 0.0)
     weekly = db_stats.get("weekly_pnl", 0.0)
     max_abs = max(abs(daily), abs(weekly), 0.01)
@@ -308,17 +263,18 @@ async def run_analyst() -> None:
         "inline": False,
     })
 
-    combined_pnl = poly_pnl
-    color = 0x00C851 if combined_pnl >= 0 else 0xFF4444
+    color = 0x00C851 if poly_pnl >= 0 else 0xFF4444
 
     embed = {
-        "title": "Analyst Dashboard Report",
-        "description": f"Combined portfolio snapshot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        "title": "Sage Dashboard Report",
+        "description": f"Daily Polymarket snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
         "color": color,
         "fields": fields,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "PolyBot Analyst Agent"},
+        "timestamp": now.isoformat(),
+        "footer": {"text": "PolyBot Sage Agent"},
     }
 
     await discord._post_channel_message(ANALYST_CHANNEL, embed)
-    logger.info("Analyst report posted to #analyst-dashboard.")
+    logger.info("Sage report posted to #analyst-dashboard.")
+
+    _save_last_post(today_str)
