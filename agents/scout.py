@@ -215,6 +215,164 @@ def _build_position_fields(positions: dict, prices: dict) -> list[dict]:
     return fields
 
 
+# ── Binance Grid Bot Baselines ──
+FUTURES_GRID_BASELINE_PNL = 231.47
+SPOT_GRID_BASELINE_TOTAL_PROFIT = 2.80
+SPOT_GRID_BASELINE_GRID_PROFIT = 2.04
+SPOT_GRID_INVESTMENT = 105.5069
+
+
+async def fetch_binance_bots(api_key: str, secret: str) -> dict:
+    """Fetch Binance grid bot data (READ ONLY — no actions, alerts only).
+
+    Returns a dict with futures_grid, spot_grid, and xrp_price fields.
+    Falls back to hardcoded baseline values if API calls fail.
+    """
+    result = {
+        "futures_grid": {
+            "symbol": "XRPUSDT",
+            "leverage": 100,
+            "unrealized_pnl": FUTURES_GRID_BASELINE_PNL,
+            "pnl_change": 0.0,
+            "status": "RUNNING",
+        },
+        "spot_grid": {
+            "symbol": "XRPUSDT",
+            "investment": SPOT_GRID_INVESTMENT,
+            "total_profit": SPOT_GRID_BASELINE_TOTAL_PROFIT,
+            "grid_profit": SPOT_GRID_BASELINE_GRID_PROFIT,
+            "status": "RUNNING",
+        },
+        "xrp_price": 0.0,
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # ── 1. XRP spot price (no auth required) ──
+        try:
+            resp = await client.get(
+                f"{BINANCE_SPOT_URL}/api/v3/ticker/price",
+                params={"symbol": "XRPUSDT"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                result["xrp_price"] = float(resp.json().get("price", 0))
+        except Exception as exc:
+            logger.warning(f"XRP price fetch failed: {exc}")
+
+        if not api_key or not secret:
+            logger.warning("Binance API credentials not configured — using baselines.")
+            return result
+
+        # ── 2. Futures grid bot — unrealized PnL via positionRisk ──
+        try:
+            ts = int(time.time() * 1000)
+            params = {"symbol": "XRPUSDT", "timestamp": ts}
+            qs = _binance_sign(params, secret)
+            resp = await client.get(
+                f"{BINANCE_FUTURES_URL}/fapi/v1/positionRisk?{qs}",
+                headers={"X-MBX-APIKEY": api_key},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                positions = resp.json()
+                if isinstance(positions, list):
+                    for pos in positions:
+                        upnl = float(pos.get("unRealizedProfit", 0))
+                        amt = float(pos.get("positionAmt", 0))
+                        if amt != 0:
+                            result["futures_grid"]["unrealized_pnl"] = upnl
+                            result["futures_grid"]["pnl_change"] = round(
+                                upnl - FUTURES_GRID_BASELINE_PNL, 2
+                            )
+                            result["futures_grid"]["status"] = "RUNNING"
+                            break
+                    else:
+                        # No open position found — bot may have stopped
+                        result["futures_grid"]["status"] = "STOPPED"
+            else:
+                logger.warning(f"positionRisk returned {resp.status_code}: {resp.text[:200]}")
+        except Exception as exc:
+            logger.warning(f"Futures grid positionRisk fetch failed: {exc}")
+
+        # Also try algo futures open orders endpoint (informational)
+        try:
+            ts = int(time.time() * 1000)
+            params = {"timestamp": ts}
+            qs = _binance_sign(params, secret)
+            resp = await client.get(
+                f"{BINANCE_SPOT_URL}/sapi/v1/algo/futures/openOrders?{qs}",
+                headers={"X-MBX-APIKEY": api_key},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                orders = data.get("orders", []) if isinstance(data, dict) else []
+                xrp_orders = [o for o in orders if o.get("symbol", "").upper() == "XRPUSDT"]
+                if xrp_orders:
+                    result["futures_grid"]["status"] = "RUNNING"
+                logger.info(f"Algo futures open orders for XRPUSDT: {len(xrp_orders)}")
+            else:
+                logger.warning(f"algo/futures/openOrders returned {resp.status_code}")
+        except Exception as exc:
+            logger.warning(f"algo/futures/openOrders fetch failed: {exc}")
+
+        # ── 3. Spot grid bot — via algo spot open orders ──
+        try:
+            ts = int(time.time() * 1000)
+            params = {"timestamp": ts}
+            qs = _binance_sign(params, secret)
+            resp = await client.get(
+                f"{BINANCE_SPOT_URL}/sapi/v1/algo/spot/openOrders?{qs}",
+                headers={"X-MBX-APIKEY": api_key},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                orders = data.get("orders", []) if isinstance(data, dict) else []
+                xrp_spot_orders = [o for o in orders if o.get("symbol", "").upper() == "XRPUSDT"]
+                if xrp_spot_orders:
+                    result["spot_grid"]["status"] = "RUNNING"
+                    # If the API returns profit fields, use them
+                    for order in xrp_spot_orders:
+                        total_profit = order.get("totalProfit") or order.get("profit")
+                        grid_profit = order.get("gridProfit") or order.get("matchedProfit")
+                        if total_profit is not None:
+                            result["spot_grid"]["total_profit"] = float(total_profit)
+                            result["spot_grid"]["grid_profit"] = float(grid_profit or SPOT_GRID_BASELINE_GRID_PROFIT)
+                            break
+                else:
+                    result["spot_grid"]["status"] = "STOPPED"
+                logger.info(f"Algo spot open orders for XRPUSDT: {len(xrp_spot_orders)}")
+            else:
+                logger.warning(f"algo/spot/openOrders returned {resp.status_code}")
+        except Exception as exc:
+            logger.warning(f"algo/spot/openOrders fetch failed: {exc}")
+
+        # Also check XRP spot balance for additional context
+        try:
+            ts = int(time.time() * 1000)
+            params = {"timestamp": ts}
+            qs = _binance_sign(params, secret)
+            resp = await client.get(
+                f"{BINANCE_SPOT_URL}/api/v3/account?{qs}",
+                headers={"X-MBX-APIKEY": api_key},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                balances = resp.json().get("balances", [])
+                xrp_bal = next(
+                    (b for b in balances if b.get("asset", "").upper() == "XRP"), None
+                )
+                if xrp_bal:
+                    free = float(xrp_bal.get("free", 0))
+                    locked = float(xrp_bal.get("locked", 0))
+                    logger.info(f"XRP spot balance — free: {free}, locked: {locked}")
+        except Exception as exc:
+            logger.warning(f"Spot account balance fetch failed: {exc}")
+
+    return result
+
+
 async def run_scout() -> None:
     """Main Scout agent: gather intel and post to #scout-intel channel."""
     logger.info("Scout agent starting...")
@@ -225,10 +383,11 @@ async def run_scout() -> None:
     discord = DiscordAlerts(bot_token=bot_token)
 
     # Gather all data concurrently
-    binance_data, news, opps = await asyncio.gather(
+    binance_data, news, opps, bot_data = await asyncio.gather(
         fetch_binance_positions(api_key, secret),
         fetch_crypto_news(),
         fetch_polymarket_opportunities(),
+        fetch_binance_bots(api_key, secret),
         return_exceptions=True,
     )
 
@@ -242,6 +401,9 @@ async def run_scout() -> None:
     if isinstance(opps, Exception):
         logger.error(f"Polymarket fetch failed: {opps}")
         opps = []
+    if isinstance(bot_data, Exception):
+        logger.error(f"Bot data fetch failed: {bot_data}")
+        bot_data = None
 
     # Fetch current prices for any futures symbols
     futures_symbols = [p.get("symbol", "") for p in binance_data.get("futures_positions", [])]
@@ -277,7 +439,58 @@ async def run_scout() -> None:
         "inline": False,
     })
 
-    # Compose and send the embed
+    # ── Bot monitoring embed (always sent) ──
+    if bot_data:
+        futures = bot_data.get("futures_grid", {})
+        spot = bot_data.get("spot_grid", {})
+        xrp_price = bot_data.get("xrp_price", 0.0)
+
+        futures_pnl = futures.get("unrealized_pnl", FUTURES_GRID_BASELINE_PNL)
+        futures_change = futures.get("pnl_change", 0.0)
+        futures_status = futures.get("status", "UNKNOWN")
+        futures_change_str = f"{'+' if futures_change >= 0 else ''}{futures_change:.2f}"
+
+        spot_total = spot.get("total_profit", SPOT_GRID_BASELINE_TOTAL_PROFIT)
+        spot_grid_profit = spot.get("grid_profit", SPOT_GRID_BASELINE_GRID_PROFIT)
+        spot_investment = spot.get("investment", SPOT_GRID_INVESTMENT)
+        spot_status = spot.get("status", "UNKNOWN")
+
+        bot_embed = {
+            "title": "📡 Scout Report",
+            "color": 3447003,  # Blue
+            "fields": [
+                {
+                    "name": "🔴 Futures Grid XRP/USDT (100x)",
+                    "value": (
+                        f"Unrealized P&L: **${futures_pnl:,.2f}**\n"
+                        f"Change vs Baseline (${FUTURES_GRID_BASELINE_PNL:.2f}): **{futures_change_str}**\n"
+                        f"Status: **{futures_status}**"
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "🟢 Spot Grid XRP/USDT",
+                    "value": (
+                        f"Investment: **${spot_investment:.4f} USDT**\n"
+                        f"Total Profit: **${spot_total:.2f}**\n"
+                        f"Grid Profit: **${spot_grid_profit:.2f}**\n"
+                        f"Status: **{spot_status}**"
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "💹 XRP Price",
+                    "value": f"**${xrp_price:.4f}**" if xrp_price else "Unavailable",
+                    "inline": False,
+                },
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "PolyBot Scout Agent — READ ONLY"},
+        }
+        await discord._post_channel_message(SCOUT_INTEL_CHANNEL, bot_embed)
+        logger.info("Scout bot monitoring report posted to #scout-intel.")
+
+    # ── Compose and send the main intel embed ──
     open_orders = len(binance_data.get("spot_orders", []))
     futures_count = len(binance_data.get("futures_positions", []))
     spot_count = len(binance_data.get("spot_balances", []))

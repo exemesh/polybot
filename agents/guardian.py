@@ -27,6 +27,13 @@ BOT_CONTROL_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "bot_control.json"
 )
 
+XRP_PRICE_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "xrp_price_cache.json"
+)
+
+# Baseline values for grid bots
+FUTURES_GRID_BASELINE_PNL = 231.47
+
 # Alert thresholds
 WARN_AGAINST_PCT = 5.0      # warn if position moves >5% against entry
 CRITICAL_AGAINST_PCT = 10.0 # critical if >10% against entry
@@ -161,6 +168,169 @@ def _analyze_positions(positions: list[dict]) -> list[dict]:
     return alerts
 
 
+def _load_xrp_price_cache() -> dict:
+    """Load the XRP price cache from disk."""
+    try:
+        if os.path.exists(XRP_PRICE_CACHE_PATH):
+            with open(XRP_PRICE_CACHE_PATH) as f:
+                return json.load(f)
+    except Exception as exc:
+        logger.warning(f"XRP price cache read failed: {exc}")
+    return {}
+
+
+def _save_xrp_price_cache(data: dict) -> None:
+    """Save the XRP price cache to disk."""
+    try:
+        os.makedirs(os.path.dirname(XRP_PRICE_CACHE_PATH), exist_ok=True)
+        with open(XRP_PRICE_CACHE_PATH, "w") as f:
+            json.dump(data, f)
+    except Exception as exc:
+        logger.warning(f"XRP price cache write failed: {exc}")
+
+
+async def monitor_binance_bots(bot_data: dict, discord: "DiscordAlerts") -> int:
+    """Check grid bot thresholds and send alerts to #guardian-alerts.
+
+    READ ONLY — no orders, no trades, no API writes. Only alerts.
+    Returns the number of alerts sent.
+    """
+    alert_count = 0
+    now = datetime.now(timezone.utc).isoformat()
+
+    futures = bot_data.get("futures_grid", {})
+    spot = bot_data.get("spot_grid", {})
+    xrp_price = bot_data.get("xrp_price", 0.0)
+
+    futures_pnl = futures.get("unrealized_pnl", FUTURES_GRID_BASELINE_PNL)
+    spot_total_profit = spot.get("total_profit", 0.0)
+    spot_status = spot.get("status", "UNKNOWN")
+
+    # ── Futures Grid Alerts ──
+    if futures_pnl < 150:
+        embed = {
+            "title": "🚨 Futures Grid P&L CRITICAL",
+            "description": (
+                f"**P&L: ${futures_pnl:,.2f}** — Down significantly from "
+                f"${FUTURES_GRID_BASELINE_PNL:.2f} baseline.\n"
+                f"Consider reviewing position."
+            ),
+            "color": COLOR_RED,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.warning(f"CRITICAL: Futures Grid P&L at ${futures_pnl:.2f}")
+    elif futures_pnl < 200:
+        embed = {
+            "title": "⚠️ Futures Grid P&L Warning",
+            "description": (
+                f"**P&L: ${futures_pnl:,.2f}** — Approaching risk threshold.\n"
+                f"Baseline was ${FUTURES_GRID_BASELINE_PNL:.2f}."
+            ),
+            "color": COLOR_YELLOW,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.warning(f"WARNING: Futures Grid P&L at ${futures_pnl:.2f}")
+    elif futures_pnl >= 400:
+        embed = {
+            "title": "🚀 Futures Grid P&L — Exceptional!",
+            "description": (
+                f"**P&L: ${futures_pnl:,.2f}** — Exceptional performance!\n"
+                f"Up ${futures_pnl - FUTURES_GRID_BASELINE_PNL:.2f} from baseline."
+            ),
+            "color": COLOR_GREEN,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.info(f"Futures Grid P&L at exceptional ${futures_pnl:.2f}")
+    elif futures_pnl >= 300:
+        embed = {
+            "title": "🎯 Futures Grid Hitting $300+ P&L!",
+            "description": (
+                f"**P&L: ${futures_pnl:,.2f}** — Consider taking some profit.\n"
+                f"Up ${futures_pnl - FUTURES_GRID_BASELINE_PNL:.2f} from baseline."
+            ),
+            "color": COLOR_GREEN,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.info(f"Futures Grid P&L milestone at ${futures_pnl:.2f}")
+
+    # ── Spot Grid Alerts ──
+    if spot_total_profit < 0:
+        embed = {
+            "title": "🚨 Spot Grid Now in Loss",
+            "description": f"**Total profit: ${spot_total_profit:,.2f}** — Grid bot is in a loss position.",
+            "color": COLOR_RED,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.warning(f"Spot Grid in loss: ${spot_total_profit:.2f}")
+
+    if spot_status == "STOPPED":
+        embed = {
+            "title": "🚨 Spot Grid Bot Has STOPPED",
+            "description": "The XRP/USDT Spot Grid Bot has **STOPPED** running.",
+            "color": COLOR_RED,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.warning("Spot Grid bot has stopped.")
+
+    if spot_total_profit > 5.00:
+        embed = {
+            "title": "✅ Spot Grid Profit Milestone",
+            "description": f"**Total profit: ${spot_total_profit:,.2f}** — Milestone reached!",
+            "color": COLOR_GREEN,
+            "timestamp": now,
+            "footer": {"text": "PolyBot Guardian — READ ONLY"},
+        }
+        await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+        alert_count += 1
+        logger.info(f"Spot Grid profit milestone: ${spot_total_profit:.2f}")
+
+    # ── XRP Price Movement Alert ──
+    if xrp_price and xrp_price > 0:
+        cache = _load_xrp_price_cache()
+        last_price = cache.get("price", 0.0)
+
+        if last_price and last_price > 0:
+            price_change_pct = abs(xrp_price - last_price) / last_price * 100
+            if price_change_pct >= 5.0:
+                direction = "+" if xrp_price >= last_price else "-"
+                embed = {
+                    "title": "📊 XRP Price Movement Alert",
+                    "description": (
+                        f"XRP moved **{direction}{price_change_pct:.1f}%** in last cycle.\n"
+                        f"Previous: **${last_price:.4f}** → Current: **${xrp_price:.4f}**"
+                    ),
+                    "color": COLOR_YELLOW,
+                    "timestamp": now,
+                    "footer": {"text": "PolyBot Guardian — READ ONLY"},
+                }
+                await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
+                alert_count += 1
+                logger.info(f"XRP price moved {direction}{price_change_pct:.1f}%: ${last_price:.4f} → ${xrp_price:.4f}")
+
+        # Always update the cache with latest price
+        _save_xrp_price_cache({"price": xrp_price, "timestamp": now})
+
+    return alert_count
+
+
 async def run_guardian() -> None:
     """Main Guardian agent: monitor risk and post alerts to #guardian-alerts."""
     logger.info("Guardian agent starting...")
@@ -170,11 +340,15 @@ async def run_guardian() -> None:
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
     discord = DiscordAlerts(bot_token=bot_token)
 
+    # Import here to avoid circular imports
+    from agents.scout import fetch_binance_bots
+
     # Fetch data concurrently
-    positions, account, control = await asyncio.gather(
+    positions, account, control, bot_data = await asyncio.gather(
         fetch_futures_positions(api_key, secret),
         fetch_futures_account(api_key, secret),
         asyncio.to_thread(load_bot_control, BOT_CONTROL_PATH),
+        fetch_binance_bots(api_key, secret),
         return_exceptions=True,
     )
 
@@ -187,6 +361,9 @@ async def run_guardian() -> None:
     if isinstance(control, Exception):
         logger.error(f"Guardian: control load error: {control}")
         control = {}
+    if isinstance(bot_data, Exception):
+        logger.error(f"Guardian: bot data fetch error: {bot_data}")
+        bot_data = None
 
     alert_count = 0
 
@@ -256,5 +433,12 @@ async def run_guardian() -> None:
             }
             await discord._post_channel_message(GUARDIAN_CHANNEL, embed)
             alert_count += 1
+
+    # ── 4. Binance grid bot monitoring (READ ONLY — alerts only) ──
+    if bot_data:
+        bot_alerts = await monitor_binance_bots(bot_data, discord)
+        alert_count += bot_alerts
+    else:
+        logger.warning("Guardian: no bot data available for grid bot monitoring.")
 
     logger.info(f"Guardian check complete. {alert_count} alert(s) sent to #guardian-alerts.")
