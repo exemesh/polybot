@@ -25,3 +25,9 @@ tenacity>=8.2.0
 
 # Type hints
 typing-extensions>=4.0.0
+
+# Binance API client (agent swarm)
+python-binance>=1.0.19
+
+# Async HTTP (already covered by httpx, but explicit for agent swarm)
+aiohttp>=3.9.0

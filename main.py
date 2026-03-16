@@ -382,6 +382,13 @@ class PolyBot:
             await strategy.cleanup()
         await self.profit_taker.cleanup()
 
+        # Run the Apex agent swarm (Scout, Analyst, Guardian)
+        try:
+            from agents.apex import run_apex
+            await run_apex()
+        except Exception as e:
+            logger.error(f"Apex coordinator failed: {e}", exc_info=True)
+
 
 def main():
     parser = argparse.ArgumentParser(description="PolyBot - Polymarket Trading Bot")
