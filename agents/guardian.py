@@ -1,6 +1,8 @@
 """
 Sentinel Agent — Polymarket risk monitoring → #guardian-alerts
-Posts ONLY on actual alerts. No all-clear messages. Deduplicates per day.
+Posts ONLY on genuine emergencies (trading halted, critical daily loss).
+No routine "all clear" or status messages are ever sent.
+Deduplicates alerts per day to avoid repeat noise.
 """
 
 import asyncio

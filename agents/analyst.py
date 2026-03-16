@@ -1,6 +1,6 @@
 """
 Sage Agent — Daily Polymarket P&L report → #analyst-dashboard
-Posts once daily at 8AM UTC only.
+Posts at 8AM UTC and 5PM UTC only, once per slot per day.
 """
 
 import asyncio
@@ -19,31 +19,51 @@ ANALYST_CHANNEL = "1483029691689341110"
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "polybot.db")
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-LAST_POST_PATH = os.path.join(DATA_DIR, "analyst_last_post.json")
+LAST_POSTS_PATH = os.path.join(DATA_DIR, "sage_last_posts.json")
 
-# Only post at this UTC hour
-POST_HOUR_UTC = 8
+# Post slots (UTC hours)
+POST_HOURS = {8, 17}
 
 
-def _load_last_post() -> str | None:
-    """Return the ISO date string of the last post, or None."""
+def _load_last_posts() -> dict:
+    """Return dict with last_8am_post and last_5pm_post dates (YYYY-MM-DD), or None."""
     try:
-        if os.path.exists(LAST_POST_PATH):
-            with open(LAST_POST_PATH) as f:
-                return json.load(f).get("last_post_date")
+        if os.path.exists(LAST_POSTS_PATH):
+            with open(LAST_POSTS_PATH) as f:
+                return json.load(f)
     except Exception as exc:
-        logger.warning(f"Failed to load last post timestamp: {exc}")
-    return None
+        logger.warning(f"Failed to load last post timestamps: {exc}")
+    return {}
 
 
-def _save_last_post(date_str: str) -> None:
-    """Persist today's date as last post date."""
+def _save_last_posts(data: dict) -> None:
+    """Persist last post dates."""
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(LAST_POST_PATH, "w") as f:
-            json.dump({"last_post_date": date_str, "updated_at": datetime.now(timezone.utc).isoformat()}, f)
+        with open(LAST_POSTS_PATH, "w") as f:
+            json.dump(data, f)
     except Exception as exc:
-        logger.warning(f"Failed to save last post timestamp: {exc}")
+        logger.warning(f"Failed to save last post timestamps: {exc}")
+
+
+def _slot_key(hour: int) -> str:
+    """Return the last_posts dict key for a given hour."""
+    if hour == 8:
+        return "last_8am_post"
+    elif hour == 17:
+        return "last_5pm_post"
+    return f"last_{hour}h_post"
+
+
+def _already_posted_today(last_posts: dict, hour: int) -> bool:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return last_posts.get(_slot_key(hour)) == today
+
+
+def _mark_posted_today(last_posts: dict, hour: int) -> None:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    last_posts[_slot_key(hour)] = today
+    last_posts["updated_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def fetch_trade_stats_from_db(db_path: str) -> dict:
@@ -157,22 +177,25 @@ def _ascii_bar(value: float, max_val: float, width: int = 12) -> str:
 
 
 async def run_analyst() -> None:
-    """Main Sage agent: compile Polymarket stats and post once daily at 8AM UTC."""
+    """
+    Main Sage agent: compile Polymarket stats and post at 8AM UTC and 5PM UTC.
+    Each slot (8AM, 5PM) is tracked separately — only posts once per slot per day.
+    """
     logger.info("Sage agent starting...")
 
     now = datetime.now(timezone.utc)
     current_hour = now.hour
-    today_str = now.strftime("%Y-%m-%d")
 
-    # Only post at 8AM UTC
-    if current_hour != POST_HOUR_UTC:
-        logger.info(f"Sage: current UTC hour is {current_hour}, not {POST_HOUR_UTC} — skipping post.")
+    # Only run during designated post hours
+    if current_hour not in POST_HOURS:
+        logger.info(f"Sage: current UTC hour is {current_hour}, not a post slot (8 or 17) — skipping.")
         return
 
-    # Only post once per day
-    last_post_date = _load_last_post()
-    if last_post_date == today_str:
-        logger.info(f"Sage: already posted today ({today_str}) — skipping.")
+    # Check if this specific slot has already been posted today
+    last_posts = _load_last_posts()
+    if _already_posted_today(last_posts, current_hour):
+        slot_label = "8AM" if current_hour == 8 else "5PM"
+        logger.info(f"Sage: {slot_label} UTC slot already posted today — skipping.")
         return
 
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
@@ -186,6 +209,7 @@ async def run_analyst() -> None:
         db_stats = {"error": str(db_stats), "total_trades": 0}
 
     poly_pnl = db_stats.get("total_pnl", 0.0)
+    slot_label = "8AM" if current_hour == 8 else "5PM"
 
     fields = [
         {
@@ -267,8 +291,8 @@ async def run_analyst() -> None:
     color = 0x00C851 if poly_pnl >= 0 else 0xFF4444
 
     embed = {
-        "title": "Sage Dashboard Report",
-        "description": f"Daily Polymarket snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
+        "title": f"Sage Dashboard Report — {slot_label} UTC",
+        "description": f"Polymarket snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
         "color": color,
         "fields": fields,
         "timestamp": now.isoformat(),
@@ -284,6 +308,7 @@ async def run_analyst() -> None:
         )
     else:
         await discord._post_channel_message(ANALYST_CHANNEL, embed)
-    logger.info("Sage report posted to #sage-analytics.")
+    logger.info(f"Sage report posted to #sage-analytics ({slot_label} UTC slot).")
 
-    _save_last_post(today_str)
+    _mark_posted_today(last_posts, current_hour)
+    _save_last_posts(last_posts)

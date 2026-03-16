@@ -1,8 +1,10 @@
 """
 Apex Coordinator — Runs Recon, Blaze, Sage, and Sentinel agents in parallel.
+Sends ONE startup message per calendar day (first run only).
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -11,16 +13,45 @@ from utils.discord_alerts import DiscordAlerts
 
 logger = logging.getLogger("polybot.apex")
 
-# All channel IDs for the startup broadcast
-CHANNELS = {
-    "scout-intel": "1483029658072121355",
-    "trader-bot": "1483029674396487762",
-    "analyst-dashboard": "1483029691689341110",
-    "guardian-alerts": "1483029707329896471",
-}
+# apex-command channel for startup message
+APEX_COMMAND_CHANNEL = "1482503179504586904"
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+LAST_STARTUP_PATH = os.path.join(DATA_DIR, "apex_last_startup.json")
 
 COLOR_BLUE = 0x007BFF
 
+
+# ── Startup deduplication helpers ───────────────────────────────────────────
+
+def _load_last_startup_date() -> str | None:
+    """Return the date string (YYYY-MM-DD) of the last startup message, or None."""
+    try:
+        if os.path.exists(LAST_STARTUP_PATH):
+            with open(LAST_STARTUP_PATH) as f:
+                return json.load(f).get("last_startup_date")
+    except Exception as exc:
+        logger.warning(f"Failed to load last startup date: {exc}")
+    return None
+
+
+def _save_last_startup_date(date_str: str) -> None:
+    """Persist today's date as the last startup date."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(LAST_STARTUP_PATH, "w") as f:
+            json.dump(
+                {
+                    "last_startup_date": date_str,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                f,
+            )
+    except Exception as exc:
+        logger.warning(f"Failed to save last startup date: {exc}")
+
+
+# ── Agent runner ─────────────────────────────────────────────────────────────
 
 async def _run_agent(name: str, coro) -> None:
     """Run a single agent coroutine and catch all exceptions."""
@@ -32,51 +63,49 @@ async def _run_agent(name: str, coro) -> None:
         logger.error(f"Apex: {name} raised an error: {exc}", exc_info=True)
 
 
-async def _send_startup_message(discord: DiscordAlerts) -> None:
-    """Broadcast a startup notice to all channels."""
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    tasks = []
-    for channel_name, channel_id in CHANNELS.items():
-        embed = {
-            "title": "Apex Coordinator Online",
-            "description": (
-                f"Agent swarm starting at {ts}.\n"
-                f"Recon, Blaze, Sage, and Sentinel are launching in parallel."
-            ),
-            "color": COLOR_BLUE,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "footer": {"text": f"PolyBot Apex — #{channel_name}"},
-        }
-        tasks.append(discord._post_channel_message(channel_id, embed))
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for channel_name, result in zip(CHANNELS.keys(), results):
-        if isinstance(result, Exception):
-            logger.warning(f"Apex: startup message to #{channel_name} failed: {result}")
+# ── Startup message ──────────────────────────────────────────────────────────
 
+async def _send_startup_message(discord: DiscordAlerts) -> None:
+    """Send a single startup message to the apex-command channel."""
+    content = "🔱 Apex online. Swarm active — Recon, Blaze, Sage and Sentinel running."
+    await discord._post_channel_message(APEX_COMMAND_CHANNEL, content)
+    logger.info("Apex: startup message sent to #apex-command.")
+
+
+# ── Main entry point ─────────────────────────────────────────────────────────
 
 async def run_apex() -> None:
     """
     Main coordinator entry point.
 
-    Sends a startup message to all four channels, then runs Recon, Sage,
-    and Sentinel concurrently via asyncio.gather(). Each agent is wrapped so
-    its failure cannot crash the other agents.
+    On first run of each calendar day: sends a startup message to #apex-command.
+    On subsequent runs of the same day: skips the startup message silently.
+    Then runs Recon, Sage, and Sentinel concurrently via asyncio.gather().
+    Each agent is wrapped so its failure cannot crash the other agents.
     """
     logger.info("Apex coordinator starting...")
 
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
     discord = DiscordAlerts(bot_token=bot_token)
 
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Only send startup message once per calendar day
+    last_startup_date = _load_last_startup_date()
+    if last_startup_date == today_str:
+        logger.info(f"Apex: startup message already sent today ({today_str}) — skipping.")
+    else:
+        try:
+            await _send_startup_message(discord)
+            _save_last_startup_date(today_str)
+        except Exception as exc:
+            logger.warning(f"Apex: startup message failed: {exc}")
+
     # Lazy imports to avoid circular imports at module load time
     from agents.scout import run_scout
     from agents.analyst import run_analyst
     from agents.guardian import run_guardian
-
-    # Send startup broadcast first (best-effort)
-    try:
-        await _send_startup_message(discord)
-    except Exception as exc:
-        logger.warning(f"Apex: startup broadcast failed: {exc}")
 
     # Run all three agents in parallel
     await asyncio.gather(
