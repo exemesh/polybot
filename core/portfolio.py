@@ -252,7 +252,7 @@ class Portfolio:
             row = conn.execute(
                 "SELECT COALESCE(SUM(pnl), 0) as daily FROM trades "
                 "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') "
-                "AND DATE(created_at) = DATE('now')"
+                "AND DATE(timestamp) = DATE('now')"
             ).fetchone()
             return row["daily"]
 
