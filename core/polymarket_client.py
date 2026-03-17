@@ -296,8 +296,14 @@ class PolymarketClient:
         logger.info(f"{'[DRY RUN] ' if dry_run else ''}LIMIT {side} {size:.2f} @ ${price:.4f} token={token_id[:16]}...")
 
         if dry_run:
+            # Simulated slippage for realistic paper trading
+            slippage = 0.003  # 0.3% slippage simulation
+            if side.upper() == "BUY":
+                simulated_price = price * (1 + slippage)
+            else:
+                simulated_price = price * (1 - slippage)
             return TradeResult(success=True, order_id="dry_run_" + str(int(time.time())),
-                               filled_price=price, filled_size=size)
+                               filled_price=simulated_price, filled_size=size)
 
         await self._rate_limit()
         try:
@@ -330,8 +336,14 @@ class PolymarketClient:
         logger.info(f"{'[DRY RUN] ' if dry_run else ''}MARKET {side} ${amount_usd:.2f} token={token_id[:16]}...")
 
         if dry_run:
+            # Simulated slippage for realistic paper trading
+            slippage = 0.003  # 0.3% slippage simulation
+            if side.upper() == "BUY":
+                simulated_fill_size = amount_usd * (1 - slippage)
+            else:
+                simulated_fill_size = amount_usd * (1 - slippage)
             return TradeResult(success=True, order_id="dry_run_mkt_" + str(int(time.time())),
-                               filled_price=None, filled_size=amount_usd)
+                               filled_price=None, filled_size=simulated_fill_size)
 
         await self._rate_limit()
         try:

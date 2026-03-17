@@ -236,7 +236,7 @@ class SpreadCaptureStrategy:
             opp["no_token_id"], half, "BUY", self.settings.DRY_RUN)
 
         if yes_r.success and no_r.success:
-            expected_pnl = trade_size * live_profit
+            expected_pnl = trade_size * live_profit  # used for logging only
             trade = Trade(
                 id=None, timestamp=datetime.utcnow().isoformat(),
                 strategy="spread_capture", market_id=opp["condition_id"],
@@ -246,7 +246,7 @@ class SpreadCaptureStrategy:
                 size_usd=trade_size, edge_pct=live_profit,
                 dry_run=self.settings.DRY_RUN,
                 order_id=f"{yes_r.order_id}|{no_r.order_id}",
-                pnl=expected_pnl, status="open"
+                pnl=None, status="open"
             )
             self.portfolio.log_trade(trade)
             self.traded_markets[opp["condition_id"]] = time.time()

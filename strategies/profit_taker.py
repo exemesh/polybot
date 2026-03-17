@@ -446,7 +446,7 @@ class ProfitTakerStrategy:
                                     size_usd * (1.0 / entry_price - 1.0) - size_usd * 0.004
                                     if entry_price > 0 else 0.0
                                 )
-                                return ("CLOSE", 1.0, round(max(expected_pnl, 0), 4),
+                                return ("CLOSE", 1.0, round(expected_pnl, 4),
                                         "arb_resolved: market settled")
 
                             # Check hours to resolution
@@ -462,7 +462,7 @@ class ProfitTakerStrategy:
                                             size_usd * (1.0 / entry_price - 1.0) - size_usd * 0.004
                                             if entry_price > 0 else 0.0
                                         )
-                                        return ("CLOSE", 1.0, round(max(expected_pnl, 0), 4),
+                                        return ("CLOSE", 1.0, round(expected_pnl, 4),
                                                 "arb_past_resolution: market should have settled")
                                 except Exception:
                                     pass

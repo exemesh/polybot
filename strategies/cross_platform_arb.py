@@ -234,7 +234,11 @@ class CrossPlatformArbStrategy:
         )
 
         if yes_result.success and no_result.success:
-            expected_profit = (max_size / opp["total_cost"]) * opp["net_profit_per_dollar"]
+            # Fix: use total investment (max_size * 2) as denominator
+            # For a $5+$5 arb at combined cost total_cost:
+            # expected_profit = total_invested * (1 - total_cost)
+            total_invested = max_size * 2
+            expected_profit = total_invested * (1 - opp["total_cost"])
 
             trade = Trade(
                 id=None, timestamp=datetime.utcnow().isoformat(),
@@ -244,7 +248,7 @@ class CrossPlatformArbStrategy:
                 price=opp["total_cost"], size_usd=max_size * 2,
                 edge_pct=opp["edge_pct"], dry_run=self.settings.DRY_RUN,
                 order_id=f"{yes_result.order_id}|{no_result.order_id}",
-                pnl=expected_profit, status="open"
+                pnl=None, status="open"
             )
             self.portfolio.log_trade(trade)
             self.executed_arbs[opp["condition_id"]] = time.time()
@@ -347,7 +351,7 @@ class CrossPlatformArbStrategy:
             token_id=opp["poly_yes_token"],
             price=opp["poly_yes_price"],
             size_usd=size, edge_pct=opp["net_spread"],
-            dry_run=True, pnl=None, status="open"
+            dry_run=getattr(self.settings, 'DRY_RUN', True), pnl=None, status="open"
         )
         self.portfolio.log_trade(trade)
 

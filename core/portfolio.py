@@ -241,15 +241,18 @@ class Portfolio:
 
     def get_total_pnl(self) -> float:
         with self._get_conn() as conn:
-            row = conn.execute("SELECT COALESCE(SUM(pnl), 0) as total FROM trades WHERE pnl IS NOT NULL").fetchone()
+            row = conn.execute(
+                "SELECT COALESCE(SUM(pnl), 0) as total FROM trades "
+                "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
+            ).fetchone()
             return row["total"]
 
     def get_daily_pnl(self) -> float:
-        today = date.today().isoformat()
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT COALESCE(SUM(pnl), 0) as daily FROM trades WHERE DATE(timestamp)=? AND pnl IS NOT NULL",
-                (today,)
+                "SELECT COALESCE(SUM(pnl), 0) as daily FROM trades "
+                "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') "
+                "AND DATE(created_at) = DATE('now')"
             ).fetchone()
             return row["daily"]
 
@@ -260,15 +263,41 @@ class Portfolio:
             ).fetchone()
             return row["deployed"]
 
-    def get_win_rate(self) -> float:
+    def get_win_rate(self) -> dict:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) as total, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins "
-                "FROM trades WHERE pnl IS NOT NULL"
+                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
             ).fetchone()
             total = row["total"]
-            wins = row["wins"] or 0
-            return (wins / total * 100) if total > 0 else 0.0
+            wins = int(row["wins"] or 0)
+            if total == 0:
+                return {"win_rate": 0.0, "total": 0, "wins": 0, "losses": 0}
+            losses = total - wins
+            return {
+                "win_rate": round(wins / total * 100, 2),
+                "total": total,
+                "wins": wins,
+                "losses": losses,
+            }
+
+    def get_realized_pnl_summary(self) -> dict:
+        """Return a breakdown of realized (closed) vs unrealized (open) P&L."""
+        with self._get_conn() as conn:
+            realized_row = conn.execute(
+                "SELECT COALESCE(SUM(pnl), 0) as total_realized, COUNT(*) as closed_count "
+                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
+            ).fetchone()
+            unrealized_row = conn.execute(
+                "SELECT COALESCE(SUM(pnl), 0) as total_unrealized, COUNT(*) as open_count "
+                "FROM trades WHERE status = 'open' AND pnl IS NOT NULL"
+            ).fetchone()
+        return {
+            "total_realized": round(float(realized_row["total_realized"]), 4),
+            "total_unrealized": round(float(unrealized_row["total_unrealized"]), 4),
+            "open_positions": int(unrealized_row["open_count"]),
+            "closed_trades": int(realized_row["closed_count"]),
+        }
 
     def get_portfolio_value(self) -> float:
         """Get portfolio value — uses real wallet balance if available, else initial_capital + pnl."""
@@ -285,7 +314,7 @@ class Portfolio:
         daily_pnl = self.get_daily_pnl()
         deployed = self.get_deployed_capital()
         portfolio_val = self.get_portfolio_value()
-        win_rate = self.get_win_rate()
+        win_rate_data = self.get_win_rate()
         pct_return = (total_pnl / self.initial_capital * 100) if self.initial_capital > 0 else 0
         usdc = self._wallet_balances.get("usdc", 0)
         matic = self._wallet_balances.get("matic", 0)
@@ -294,13 +323,14 @@ class Portfolio:
         return (
             f"Portfolio Value: ${portfolio_val:.2f}\n"
             f"Polymarket Cash: ${poly_cash:.2f} | On-chain: ${usdc:.2f} USDC | {matic:.4f} MATIC\n"
-            f"Total PnL: ${total_pnl:+.2f} ({pct_return:+.1f}%)\n"
-            f"Today's PnL: ${daily_pnl:+.2f}\n"
+            f"Total PnL (Realized): ${total_pnl:+.2f} ({pct_return:+.1f}%)\n"
+            f"Today's PnL (Realized): ${daily_pnl:+.2f}\n"
             f"Deployed: ${deployed:.2f}\n"
-            f"Win Rate: {win_rate:.1f}%"
+            f"Win Rate: {win_rate_data['win_rate']:.1f}% ({win_rate_data['wins']}W/{win_rate_data['losses']}L of {win_rate_data['total']} closed)"
         )
 
     def snapshot(self):
+        win_rate_data = self.get_win_rate()
         with self._get_conn() as conn:
             conn.execute("""
                 INSERT INTO portfolio_snapshots
@@ -314,7 +344,7 @@ class Portfolio:
                 self.get_total_pnl(),
                 self.get_daily_pnl(),
                 self._count_trades(),
-                self.get_win_rate()
+                win_rate_data["win_rate"]
             ))
 
     def _count_trades(self) -> int:
@@ -499,7 +529,8 @@ class Portfolio:
         daily_pnl = self.get_daily_pnl()
         deployed = self.get_deployed_capital()
         portfolio_val = self.get_portfolio_value()
-        win_rate = self.get_win_rate()
+        win_rate_data = self.get_win_rate()
+        pnl_summary = self.get_realized_pnl_summary()
         total_trades = self._count_trades()
         pct_return = (total_pnl / self.initial_capital * 100) if self.initial_capital > 0 else 0
 
@@ -511,11 +542,15 @@ class Portfolio:
             "portfolio_value": round(portfolio_val, 2),
             "available_cash": available_cash,
             "total_pnl": round(total_pnl, 2),
+            "realized_pnl": pnl_summary["total_realized"],
+            "unrealized_pnl": pnl_summary["total_unrealized"],
             "daily_pnl": round(daily_pnl, 2),
             "pct_return": round(pct_return, 2),
             "deployed_capital": round(deployed, 2),
-            "win_rate": round(win_rate, 1),
+            "win_rate": win_rate_data["win_rate"],
             "total_trades": total_trades,
+            "closed_trades": pnl_summary["closed_trades"],
+            "open_positions_count": pnl_summary["open_positions"],
             "initial_capital": self.initial_capital,
         }
 

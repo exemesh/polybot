@@ -67,7 +67,11 @@ def _mark_posted_today(last_posts: dict, hour: int) -> None:
 
 
 def fetch_trade_stats_from_db(db_path: str) -> dict:
-    """Read trade history from the polybot SQLite database and compute stats."""
+    """Read trade history from the polybot SQLite database and compute stats.
+
+    Separates realized P&L (closed trades only) from unrealized P&L (open positions).
+    Win rate is computed from closed trades only to avoid inflated metrics.
+    """
     stats = {
         "total_trades": 0,
         "wins": 0,
@@ -76,9 +80,12 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
         "avg_profit": 0.0,
         "best_trade": 0.0,
         "worst_trade": 0.0,
-        "total_pnl": 0.0,
+        "total_pnl": 0.0,           # Realized P&L only (closed trades)
+        "unrealized_pnl": 0.0,      # Unrealized P&L (open positions with expected pnl)
         "daily_pnl": 0.0,
         "weekly_pnl": 0.0,
+        "open_positions": 0,
+        "closed_trades": 0,
         "strategy_stats": {},
         "daily_breakdown": [],
         "error": None,
@@ -105,30 +112,42 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             conn.close()
             return stats
 
+        # Closed trades only for realized P&L stats
         try:
-            rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE status IN ('resolved','closed','won','lost') "
-                f"OR pnl IS NOT NULL ORDER BY created_at DESC LIMIT 1000"
+            closed_rows = cur.execute(
+                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL "
+                f"AND status IN ('won', 'lost', 'resolved') "
+                f"ORDER BY closed_at DESC LIMIT 1000"
             ).fetchall()
         except Exception:
-            rows = cur.execute(f"SELECT * FROM {trade_table} LIMIT 1000").fetchall()
+            closed_rows = cur.execute(
+                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL LIMIT 1000"
+            ).fetchall()
+
+        # Open positions for unrealized P&L (only those with an expected pnl stored)
+        try:
+            open_rows = cur.execute(
+                f"SELECT * FROM {trade_table} WHERE status = 'open'"
+            ).fetchall()
+        except Exception:
+            open_rows = []
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
 
-        profits = []
+        realized_profits = []
         strategy_map: dict[str, list[float]] = {}
 
-        for row in rows:
+        for row in closed_rows:
             d = dict(row)
             pnl = float(d.get("pnl") or d.get("profit") or d.get("realized_pnl") or 0.0)
-            profits.append(pnl)
+            realized_profits.append(pnl)
 
             strategy = d.get("strategy", d.get("strategy_name", "unknown"))
             strategy_map.setdefault(strategy, []).append(pnl)
 
-            ts_raw = d.get("created_at") or d.get("closed_at") or d.get("resolved_at") or ""
+            ts_raw = d.get("closed_at") or d.get("created_at") or d.get("resolved_at") or ""
             try:
                 if ts_raw:
                     ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
@@ -141,14 +160,26 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             except Exception:
                 pass
 
-        stats["total_trades"] = len(profits)
-        stats["wins"] = sum(1 for p in profits if p > 0)
-        stats["losses"] = sum(1 for p in profits if p <= 0)
-        stats["win_rate"] = (stats["wins"] / stats["total_trades"] * 100) if profits else 0.0
-        stats["avg_profit"] = sum(profits) / len(profits) if profits else 0.0
-        stats["best_trade"] = max(profits) if profits else 0.0
-        stats["worst_trade"] = min(profits) if profits else 0.0
-        stats["total_pnl"] = sum(profits)
+        # Unrealized P&L from open positions (expected pnl field, if set)
+        unrealized_total = 0.0
+        open_count = len(open_rows)
+        for row in open_rows:
+            d = dict(row)
+            expected = d.get("pnl")
+            if expected is not None:
+                unrealized_total += float(expected)
+
+        stats["total_trades"] = len(realized_profits)
+        stats["closed_trades"] = len(realized_profits)
+        stats["open_positions"] = open_count
+        stats["wins"] = sum(1 for p in realized_profits if p > 0)
+        stats["losses"] = sum(1 for p in realized_profits if p <= 0)
+        stats["win_rate"] = (stats["wins"] / stats["total_trades"] * 100) if realized_profits else 0.0
+        stats["avg_profit"] = sum(realized_profits) / len(realized_profits) if realized_profits else 0.0
+        stats["best_trade"] = max(realized_profits) if realized_profits else 0.0
+        stats["worst_trade"] = min(realized_profits) if realized_profits else 0.0
+        stats["total_pnl"] = sum(realized_profits)    # Realized P&L only
+        stats["unrealized_pnl"] = unrealized_total    # Open positions expected P&L
 
         for strat, pnls in strategy_map.items():
             stats["strategy_stats"][strat] = {
@@ -208,16 +239,26 @@ async def run_analyst() -> None:
         logger.error(f"DB stats failed: {db_stats}")
         db_stats = {"error": str(db_stats), "total_trades": 0}
 
-    poly_pnl = db_stats.get("total_pnl", 0.0)
+    realized_pnl = db_stats.get("total_pnl", 0.0)
+    unrealized_pnl = db_stats.get("unrealized_pnl", 0.0)
     slot_label = "8AM" if current_hour == 8 else "5PM"
 
     fields = [
         {
-            "name": "Polymarket P&L",
+            "name": "Realized P&L (Closed Trades Only)",
             "value": (
-                f"Total PnL: ${poly_pnl:+.4f}\n"
-                f"Daily PnL: ${db_stats.get('daily_pnl', 0):+.4f}\n"
-                f"Weekly PnL: ${db_stats.get('weekly_pnl', 0):+.4f}"
+                f"Realized P&L: ${realized_pnl:+.4f}\n"
+                f"Daily Realized: ${db_stats.get('daily_pnl', 0):+.4f}\n"
+                f"Weekly Realized: ${db_stats.get('weekly_pnl', 0):+.4f}"
+            ),
+            "inline": True,
+        },
+        {
+            "name": "Unrealized (Open Positions)",
+            "value": (
+                f"Unrealized P&L: ${unrealized_pnl:+.4f}\n"
+                f"Open Positions: {db_stats.get('open_positions', 0)}\n"
+                f"Closed Trades: {db_stats.get('closed_trades', 0)}"
             ),
             "inline": True,
         },
@@ -230,18 +271,18 @@ async def run_analyst() -> None:
             "inline": False,
         })
     else:
-        total_trades = db_stats.get("total_trades", 0)
+        total_trades = db_stats.get("closed_trades", db_stats.get("total_trades", 0))
         win_rate = db_stats.get("win_rate", 0.0)
         avg_profit = db_stats.get("avg_profit", 0.0)
         best = db_stats.get("best_trade", 0.0)
         worst = db_stats.get("worst_trade", 0.0)
 
         fields.append({
-            "name": "Trade Statistics",
+            "name": "Trade Statistics (Closed Trades Only)",
             "value": (
-                f"Total Trades: {total_trades}\n"
+                f"Closed Trades: {total_trades}\n"
                 f"Wins: {db_stats.get('wins', 0)} | Losses: {db_stats.get('losses', 0)}\n"
-                f"Win Rate: {win_rate:.1f}%\n"
+                f"Win Rate: {win_rate:.1f}%  ← closed trades only\n"
                 f"Avg Profit: ${avg_profit:+.4f}\n"
                 f"Best Trade: ${best:+.4f} | Worst: ${worst:+.4f}"
             ),
@@ -279,16 +320,16 @@ async def run_analyst() -> None:
     weekly = db_stats.get("weekly_pnl", 0.0)
     max_abs = max(abs(daily), abs(weekly), 0.01)
     chart = (
-        f"Today  {_ascii_bar(daily, max_abs)} ${daily:+.4f}\n"
-        f"7-Day  {_ascii_bar(weekly, max_abs)} ${weekly:+.4f}"
+        f"Today  {_ascii_bar(daily, max_abs)} ${daily:+.4f}  (realized)\n"
+        f"7-Day  {_ascii_bar(weekly, max_abs)} ${weekly:+.4f}  (realized)"
     )
     fields.append({
-        "name": "P&L Chart (ASCII)",
+        "name": "Realized P&L Chart (ASCII)",
         "value": f"```\n{chart}\n```",
         "inline": False,
     })
 
-    color = 0x00C851 if poly_pnl >= 0 else 0xFF4444
+    color = 0x00C851 if realized_pnl >= 0 else 0xFF4444
 
     embed = {
         "title": f"Sage Dashboard Report — {slot_label} UTC",

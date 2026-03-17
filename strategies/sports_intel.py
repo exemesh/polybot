@@ -576,7 +576,7 @@ class SportsIntelStrategy:
                 opp["no_token_id"], half, "BUY", self.settings.DRY_RUN)
 
             if yes_r.success and no_r.success:
-                pnl = trade_size * opp["edge"]
+                expected_pnl = trade_size * opp["edge"]  # used for logging only
                 trade = Trade(
                     id=None, timestamp=datetime.utcnow().isoformat(),
                     strategy="sports_intel", market_id=opp["condition_id"],
@@ -586,7 +586,7 @@ class SportsIntelStrategy:
                     size_usd=trade_size, edge_pct=opp["edge"],
                     dry_run=self.settings.DRY_RUN,
                     order_id=f"{yes_r.order_id}|{no_r.order_id}",
-                    pnl=pnl, status="open"
+                    pnl=None, status="open"
                 )
                 self.portfolio.log_trade(trade)
                 self.traded_markets[opp["condition_id"]] = time.time()

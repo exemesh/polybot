@@ -106,7 +106,7 @@ class Settings:
     MM_INVENTORY_SKEW: float = 0.3
 
     # ─── Cross-Platform Arb Config ───────────────────────────────────
-    ARB_MIN_EDGE_PCT: float = 0.005           # 0.5% edge min — AGGRESSIVE (was 1.5%)
+    ARB_MIN_EDGE_PCT: float = 0.02            # 2% edge min — ensures real fees and slippage are absorbed (was 0.5%)
     ARB_SCAN_INTERVAL: int = 5                # Faster scanning
     ARB_MAX_POSITION_USD: float = 50.0        # Up to $50 per arb (was $20)
     ARB_POLY_FEE: float = 0.001
