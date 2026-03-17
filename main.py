@@ -341,10 +341,12 @@ class PolyBot:
         await self.alerter.send(f"Scan complete\n{summary}")
 
         # Send Discord PnL summary
+        win_rate_data = self.portfolio.get_win_rate()
+        win_rate = win_rate_data.get('win_rate', 0.0) if isinstance(win_rate_data, dict) else win_rate_data
         await send_pnl_update(
             total_pnl=self.portfolio.get_total_pnl(),
             daily_pnl=self.portfolio.get_daily_pnl(),
-            win_rate=self.portfolio.get_win_rate(),
+            win_rate=win_rate,
             open_positions=len(self.portfolio.get_open_positions()),
         )
 

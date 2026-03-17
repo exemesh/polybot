@@ -128,6 +128,11 @@ class DiscordAlerts:
             total_pnl:  All-time realized P&L in USD.
             win_rate:   Win rate as a percentage (0–100).
         """
+        # If win_rate is a dict, extract the float value
+        if isinstance(win_rate, dict):
+            win_rate_pct = win_rate.get('win_rate', 0.0)
+        else:
+            win_rate_pct = float(win_rate)
         color = COLOR_GREEN if total_pnl >= 0 else COLOR_RED
         total_sign = "+" if total_pnl >= 0 else ""
         daily_sign = "+" if daily_pnl >= 0 else ""
@@ -147,7 +152,7 @@ class DiscordAlerts:
                 },
                 {
                     "name": "Win Rate",
-                    "value": f"{win_rate:.1f}%",
+                    "value": f"{win_rate_pct:.1f}%",
                     "inline": True,
                 },
             ],
@@ -314,6 +319,11 @@ async def send_pnl_update(
         win_rate:        Win rate as a percentage (0–100).
         open_positions:  Number of currently open positions.
     """
+    # If win_rate is a dict, extract the float value
+    if isinstance(win_rate, dict):
+        win_rate_pct = win_rate.get('win_rate', 0.0)
+    else:
+        win_rate_pct = float(win_rate)
     color = COLOR_GREEN if total_pnl >= 0 else COLOR_RED
     total_sign = "+" if total_pnl >= 0 else ""
     daily_sign = "+" if daily_pnl >= 0 else ""
@@ -333,7 +343,7 @@ async def send_pnl_update(
             },
             {
                 "name": "Win Rate",
-                "value": f"{win_rate:.1f}%",
+                "value": f"{win_rate_pct:.1f}%",
                 "inline": True,
             },
             {
