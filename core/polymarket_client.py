@@ -108,8 +108,31 @@ class PolymarketClient:
         self._last_request_time = 0
 
     def _get_client(self) -> ClobClient:
-        """Lazy-init the CLOB client (creates API creds on first call)."""
+        """
+        Lazy-init the CLOB client (creates API creds on first call).
+
+        Security: checks KeyVault first — key never leaves the vault.
+        Falls back to settings.PRIVATE_KEY for backward compatibility.
+        """
         if self._client is None:
+            # Preferred path: use KeyVault (private key stays in vault)
+            try:
+                from core.key_vault import is_ready as vault_ready, get_client as vault_client
+                if vault_ready():
+                    client = vault_client()
+                    if client is not None:
+                        try:
+                            creds = client.create_or_derive_api_creds()
+                            client.set_api_creds(creds)
+                        except Exception:
+                            pass
+                        self._client = client
+                        logger.info("CLOB client authenticated via KeyVault")
+                        return self._client
+            except ImportError:
+                pass
+
+            # Legacy fallback: direct key from settings
             if self.settings.PRIVATE_KEY:
                 try:
                     self._client = ClobClient(
@@ -120,14 +143,15 @@ class PolymarketClient:
                     )
                     creds = self._client.create_or_derive_api_creds()
                     self._client.set_api_creds(creds)
-                    logger.info("Polymarket CLOB client authenticated successfully")
+                    logger.warning(
+                        "CLOB client using PRIVATE_KEY from settings (legacy). "
+                        "Prefer key_vault.init_vault() at startup."
+                    )
                 except Exception as e:
                     logger.error(f"CLOB client auth failed: {e}")
-                    # Fall back to read-only
                     self._client = ClobClient(self.settings.CLOB_HOST)
                     logger.info("Falling back to read-only CLOB client")
             else:
-                # Read-only mode
                 self._client = ClobClient(self.settings.CLOB_HOST)
                 logger.info("Polymarket CLOB client in read-only mode (no private key)")
         return self._client
