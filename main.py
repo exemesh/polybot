@@ -37,6 +37,9 @@ from strategies.sports_intel import SportsIntelStrategy
 from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
 from core.win_rate_monitor import check as check_win_rate, format_discord_alert, load_recalibration
+from core.key_vault import init_vault, redacted_repr as vault_repr
+from core.reasoning_logger import init_reasoning_logger, log_cycle_summary
+from core.order_staging import OrderStagingBuffer
 from utils.logger import setup_logger
 from utils.telegram_alerts import TelegramAlerter
 from utils.discord_alerts import (
@@ -204,11 +207,36 @@ class PolyBot:
         else:
             self.settings.DRY_RUN = True
 
+        # ── Security Layer 1: Key Vault ──────────────────────────────────────
+        # Load private key into vault ONCE. Agents never receive the key directly.
+        # Principle: "Don't trust agents with secrets"
+        if self.settings.PRIVATE_KEY:
+            init_vault(
+                self.settings.PRIVATE_KEY,
+                self.settings.CLOB_HOST,
+                getattr(self.settings, "CHAIN_ID", 137),
+            )
+            logger.info(f"Security: {vault_repr()}")
+        else:
+            logger.info("Security: KeyVault uninitialised (paper trading / no key)")
+
         self.portfolio = Portfolio(self.settings)
         self.risk_manager = RiskManager(self.settings, self.portfolio)
         self.alerter = TelegramAlerter(self.settings)
         # Discord alerter functions are module-level; settings provide DISCORD_WEBHOOK_URL
         self.export_dashboard = export_dashboard
+
+        # ── Security Layer 2: Order Staging Buffer ────────────────────────────
+        # Proposed orders are validated before execution.
+        # Principle: "Stage and vet all writes"
+        self.order_staging = OrderStagingBuffer(self.portfolio, self.settings)
+
+        # ── Security Layer 3: Reasoning Logger ───────────────────────────────
+        # Full forensic log of every agent signal and decision.
+        # Principle: "Log everything"
+        data_dir = str(Path(self.settings.DB_PATH).parent)
+        init_reasoning_logger(self.settings.DB_PATH, data_dir)
+        logger.info("Security: ReasoningLogger active")
 
         # ── Apply emergency halt from control file ──
         if self.control.is_halted:
