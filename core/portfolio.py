@@ -16,6 +16,8 @@ from pathlib import Path
 
 import httpx
 
+from core.fee_guard import calculate_net_pnl, get_market_type, calculate_taker_fee
+
 logger = logging.getLogger("polybot.portfolio")
 
 
@@ -202,6 +204,13 @@ class Portfolio:
                 conn.execute("ALTER TABLE trades ADD COLUMN closed_at TEXT")
                 conn.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
                 logger.info("Migrated DB: added closed_at, close_reason columns")
+
+            # Migration: add market_type column for fee-aware P&L calculation
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN market_type TEXT DEFAULT 'free'")
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
 
         logger.info(f"Database initialized at {self.db_path}")
 
@@ -477,18 +486,24 @@ class Portfolio:
             # Payout is always $1.00 per pair
             if entry_price > 0:
                 tokens_per_side = size_usd / 2 / (entry_price / 2)
-                pnl = tokens_per_side * 1.0 - size_usd
-                # Subtract fees (~0.2% each side)
-                pnl -= size_usd * 0.004
+                gross_pnl = tokens_per_side * 1.0 - size_usd
+                # Use fee_guard for accurate per-market fee calculation
+                mtype = get_market_type(market_question=trade.get("market_question", "") or "")
+                shares = size_usd / entry_price if entry_price > 0 else 0
+                pnl = calculate_net_pnl(gross_pnl, shares, entry_price, mtype, sides=2)
             else:
                 pnl = 0.0
 
         elif side in ("BUY_YES", "BUY"):
             # We bought YES tokens
+            mtype = get_market_type(market_question=trade.get("market_question", "") or "")
+            shares = size_usd / entry_price if entry_price > 0 else 0
             if winning and winning.upper() == "YES":
                 # WIN: tokens pay out $1 each
                 tokens_owned = size_usd / entry_price if entry_price > 0 else 0
-                pnl = tokens_owned * 1.0 - size_usd
+                gross_pnl = tokens_owned * 1.0 - size_usd
+                fee = calculate_taker_fee(shares, entry_price, mtype)
+                pnl = gross_pnl - fee
             elif winning and winning.upper() == "NO":
                 # LOSE: YES tokens worthless
                 pnl = -size_usd
@@ -497,22 +512,30 @@ class Portfolio:
                 yes_final = outcome_prices.get("YES", 0)
                 if yes_final > 0.5:
                     tokens_owned = size_usd / entry_price if entry_price > 0 else 0
-                    pnl = tokens_owned * yes_final - size_usd
+                    gross_pnl = tokens_owned * yes_final - size_usd
+                    fee = calculate_taker_fee(shares, entry_price, mtype)
+                    pnl = gross_pnl - fee
                 else:
                     pnl = -size_usd
 
         elif side == "BUY_NO":
             # We bought NO tokens
+            mtype = get_market_type(market_question=trade.get("market_question", "") or "")
+            shares = size_usd / entry_price if entry_price > 0 else 0
             if winning and winning.upper() == "NO":
                 tokens_owned = size_usd / entry_price if entry_price > 0 else 0
-                pnl = tokens_owned * 1.0 - size_usd
+                gross_pnl = tokens_owned * 1.0 - size_usd
+                fee = calculate_taker_fee(shares, entry_price, mtype)
+                pnl = gross_pnl - fee
             elif winning and winning.upper() == "YES":
                 pnl = -size_usd
             else:
                 no_final = outcome_prices.get("NO", 0)
                 if no_final > 0.5:
                     tokens_owned = size_usd / entry_price if entry_price > 0 else 0
-                    pnl = tokens_owned * no_final - size_usd
+                    gross_pnl = tokens_owned * no_final - size_usd
+                    fee = calculate_taker_fee(shares, entry_price, mtype)
+                    pnl = gross_pnl - fee
                 else:
                     pnl = -size_usd
         else:

@@ -14,6 +14,7 @@ Runs as a single scan-and-trade cycle (designed for GitHub Actions cron).
 import argparse
 import asyncio
 import logging
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -35,6 +36,7 @@ from strategies.spread_capture import SpreadCaptureStrategy
 from strategies.sports_intel import SportsIntelStrategy
 from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
+from core.win_rate_monitor import check as check_win_rate, format_discord_alert, load_recalibration
 from utils.logger import setup_logger
 from utils.telegram_alerts import TelegramAlerter
 from utils.discord_alerts import (
@@ -349,6 +351,24 @@ class PolyBot:
             win_rate=win_rate,
             open_positions=len(self.portfolio.get_open_positions()),
         )
+
+        # ── Win rate monitoring ──
+        try:
+            wr_result = check_win_rate(self.portfolio)
+            if wr_result.status in ("warn", "recalibrate"):
+                alert_msg = format_discord_alert(wr_result)
+                logging.warning(f"Win rate monitor: {wr_result.message}")
+                # Post to Sentinel channel if webhook available
+                sentinel_webhook = getattr(self.settings, 'DISCORD_WEBHOOK_SENTINEL',
+                                           os.getenv('DISCORD_WEBHOOK_SENTINEL', ''))
+                if sentinel_webhook:
+                    try:
+                        import requests
+                        requests.post(sentinel_webhook, json={"content": alert_msg}, timeout=10)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.warning(f"Win rate monitor error: {e}")
 
         # ── Update control state ──
         self.control.last_bot_run = datetime.now(timezone.utc).isoformat()
