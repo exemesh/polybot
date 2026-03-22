@@ -2,8 +2,6 @@ name: PolyBot Trading
 
 on:
   schedule:
-    # NOTE: GitHub Actions free tier has 10-60 min cron delay.
-    # Bot runs as often as GitHub allows (typically every 20-60 min).
     - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
@@ -34,6 +32,9 @@ permissions:
   contents: write
   pages: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   trade:
     runs-on: ubuntu-latest
@@ -60,7 +61,7 @@ jobs:
         with:
           name: polybot-db
           path: data/
-        continue-on-error: true  # First run won't have an artifact
+        continue-on-error: true
 
       - name: Apply control inputs
         if: github.event_name == 'workflow_dispatch'
@@ -109,7 +110,7 @@ jobs:
           with open(path, 'w') as f:
               json.dump(ctrl, f, indent=2)
 
-          print(f'Control state: mode={ctrl[\"mode\"]}, trading_enabled={ctrl[\"trading_enabled\"]}')
+          print(f'Control state: mode={ctrl["mode"]}, trading_enabled={ctrl["trading_enabled"]}')
           "
 
       - name: Run PolyBot (single cycle)
@@ -117,17 +118,25 @@ jobs:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           FUNDER_ADDRESS: ${{ secrets.FUNDER_ADDRESS }}
           DRY_RUN: ${{ secrets.DRY_RUN || 'true' }}
+          INITIAL_CAPITAL: ${{ secrets.INITIAL_CAPITAL || '100' }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are deprecated — use DISCORD_WEBHOOK_URL
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_RECON: ${{ secrets.DISCORD_WEBHOOK_RECON }}
+          DISCORD_WEBHOOK_BLAZE: ${{ secrets.DISCORD_WEBHOOK_BLAZE }}
+          DISCORD_WEBHOOK_SAGE: ${{ secrets.DISCORD_WEBHOOK_SAGE }}
+          DISCORD_WEBHOOK_SENTINEL: ${{ secrets.DISCORD_WEBHOOK_SENTINEL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_TRADE_CHANNEL_ID: ${{ secrets.DISCORD_TRADE_CHANNEL_ID }}
+          DISCORD_ALERT_CHANNEL_ID: ${{ secrets.DISCORD_ALERT_CHANNEL_ID }}
+          DISCORD_ANALYST_CHANNEL_ID: ${{ secrets.DISCORD_ANALYST_CHANNEL_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_MODEL: ${{ secrets.AI_MODEL || 'gpt-4o-mini' }}
           NOAA_API_TOKEN: ${{ secrets.NOAA_API_TOKEN }}
           KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
           KALSHI_API_SECRET: ${{ secrets.KALSHI_API_SECRET }}
-          INITIAL_CAPITAL: ${{ secrets.INITIAL_CAPITAL || '100' }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AI_MODEL: ${{ secrets.AI_MODEL || 'gpt-4o-mini' }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_ACTIONS: 'true'
         run: python main.py --export-dashboard
 
@@ -135,9 +144,7 @@ jobs:
         if: always()
         run: |
           git add data/bot_control.json
-          git diff --cached --quiet && echo "No control changes to commit" || \
-          (git commit -m "Update bot control state [skip ci]" && \
-           git pull --rebase origin main && git push origin main)
+          git diff --cached --quiet && echo "No control changes to commit" ||           (git commit -m "Update bot control state [skip ci]" &&            git pull --rebase origin main && git push origin main)
 
       - name: Save database artifact
         uses: actions/upload-artifact@v4
@@ -151,16 +158,13 @@ jobs:
       - name: Deploy dashboard to GitHub Pages
         if: success()
         run: |
-          # Save dashboard files before switching branches
           mkdir -p /tmp/pages
           cp dashboard/index.html /tmp/pages/index.html
           cp dashboard/dashboard_data.json /tmp/pages/dashboard_data.json 2>/dev/null || true
 
-          # Create clean orphan branch
           git checkout --orphan gh-pages-deploy
           git rm -rf . 2>/dev/null || true
 
-          # Copy saved dashboard files to root
           cp /tmp/pages/index.html index.html
           cp /tmp/pages/dashboard_data.json dashboard_data.json 2>/dev/null || true
 
