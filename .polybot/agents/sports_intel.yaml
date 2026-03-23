@@ -1,0 +1,33 @@
+# SportsIntel Agent Charter
+agent: sports_intel
+display_name: SportsIntel
+description: "Uses live sports data (scores, injuries, lineup) to find mispriced sports markets"
+
+allowed_market_categories:
+  - sports
+  - football
+  - basketball
+  - baseball
+  - soccer
+
+allowed_api_domains:
+  - gamma-api.polymarket.com
+  - clob.polymarket.com
+  - api.thesportsdb.com
+  - v3.football.api-sports.io
+  - api-football-v1.p.rapidapi.com
+
+max_single_trade_usd: 3.0
+max_daily_trades: 10
+min_edge_pct: 0.035         # higher bar — sports data is lagged
+max_position_pct: 0.08
+
+canary_eligible: true
+canary_market_slice: 0.15
+
+hitl_size_threshold_usd: 1.5
+hitl_confidence_threshold: 0.85
+
+created_at: 2026-03-23
+version: "1.0"
+notes: "Data freshness is critical. Stale data (>15min) should not generate signals."
