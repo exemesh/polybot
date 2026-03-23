@@ -18,7 +18,7 @@ min_book_liquidity_usd: 500 # only enter if order book has >$500 depth
 
 canary_eligible: false      # spread capture logic is deterministic — no canary needed
 
-hitl_size_threshold_usd: 3.0
+hitl_size_threshold_usd: 10.0
 hitl_confidence_threshold: 0.95
 
 created_at: 2026-03-23
