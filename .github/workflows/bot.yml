@@ -142,9 +142,14 @@ jobs:
 
       - name: Commit control state
         if: always()
+        continue-on-error: true
         run: |
-          git add data/bot_control.json
-          git diff --cached --quiet && echo "No control changes to commit" ||           (git commit -m "Update bot control state [skip ci]" &&            git pull --rebase origin main && git push origin main)
+          git add data/bot_control.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No control state changes to commit"
+          else
+            git commit -m "Update bot control state [skip ci]" &&             git pull --rebase origin main &&             git push origin main || echo "Push skipped (no changes or conflict)"
+          fi
 
       - name: Save database artifact
         uses: actions/upload-artifact@v4
