@@ -33,7 +33,7 @@ canary_eligible: true
 canary_market_slice: 0.10
 
 # ── Human-in-the-loop ────────────────────────────────────────────────────────
-hitl_size_threshold_usd: 2.0
+hitl_size_threshold_usd: 10.0
 hitl_confidence_threshold: 0.90
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
