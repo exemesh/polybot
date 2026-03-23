@@ -288,7 +288,16 @@ class PolyBot:
             poly_cash = balances.get('polymarket_cash', 0)
             on_chain = balances.get('usdc', 0)
             logger.info(f"Wallet: Polymarket ${poly_cash:.2f} | On-chain ${on_chain:.2f} USDC | {balances['matic']:.4f} MATIC")
-        self.portfolio.set_wallet_balances(balances)
+        # Only override with wallet balance if non-zero
+        # (Gamma API returns $0 when endpoint fails — fall back to INITIAL_CAPITAL)
+        total_wallet = balances.get('usdc', 0) + balances.get('polymarket_cash', 0)
+        if total_wallet > 0:
+            self.portfolio.set_wallet_balances(balances)
+        else:
+            logger.warning(
+                f"Wallet balance check returned $0 (API may be down) — "
+                f"using INITIAL_CAPITAL=${self.settings.INITIAL_CAPITAL:.2f} as portfolio base"
+            )
 
         mode_str = "DRY RUN" if self.settings.DRY_RUN else "LIVE"
         portfolio_val = self.portfolio.get_portfolio_value()
