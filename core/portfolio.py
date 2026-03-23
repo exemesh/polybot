@@ -252,7 +252,7 @@ class Portfolio:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT COALESCE(SUM(pnl), 0) as total FROM trades "
-                "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
+                "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') AND dry_run = 0"
             ).fetchone()
             return row["total"]
 
@@ -261,14 +261,14 @@ class Portfolio:
             row = conn.execute(
                 "SELECT COALESCE(SUM(pnl), 0) as daily FROM trades "
                 "WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') "
-                "AND DATE(timestamp) = DATE('now')"
+                "AND dry_run = 0 AND DATE(timestamp) = DATE('now')"
             ).fetchone()
             return row["daily"]
 
     def get_deployed_capital(self) -> float:
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT COALESCE(SUM(size_usd), 0) as deployed FROM trades WHERE status='open'"
+                "SELECT COALESCE(SUM(size_usd), 0) as deployed FROM trades WHERE status='open' AND dry_run = 0"
             ).fetchone()
             return row["deployed"]
 
@@ -276,7 +276,7 @@ class Portfolio:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) as total, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins "
-                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
+                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') AND dry_run = 0"
             ).fetchone()
             total = row["total"]
             wins = int(row["wins"] or 0)
@@ -295,11 +295,11 @@ class Portfolio:
         with self._get_conn() as conn:
             realized_row = conn.execute(
                 "SELECT COALESCE(SUM(pnl), 0) as total_realized, COUNT(*) as closed_count "
-                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved')"
+                "FROM trades WHERE pnl IS NOT NULL AND status IN ('won', 'lost', 'resolved') AND dry_run = 0"
             ).fetchone()
             unrealized_row = conn.execute(
                 "SELECT COALESCE(SUM(pnl), 0) as total_unrealized, COUNT(*) as open_count "
-                "FROM trades WHERE status = 'open' AND pnl IS NOT NULL"
+                "FROM trades WHERE status = 'open' AND dry_run = 0 AND pnl IS NOT NULL"
             ).fetchone()
         return {
             "total_realized": round(float(realized_row["total_realized"]), 4),
