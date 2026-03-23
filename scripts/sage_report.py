@@ -88,17 +88,18 @@ def fetch_trade_stats(db_path: Path) -> dict:
                 f"SELECT * FROM {trade_table} "
                 f"WHERE pnl IS NOT NULL "
                 f"AND status IN ('won', 'lost', 'resolved') "
+                f"AND dry_run = 0 "
                 f"ORDER BY closed_at DESC LIMIT 1000"
             ).fetchall()
         except Exception:
             closed_rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL LIMIT 1000"
+                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL AND dry_run = 0 LIMIT 1000"
             ).fetchall()
 
         # ── Open positions (unrealized P&L) ──────────────────────────────────
         try:
             open_rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE status = 'open'"
+                f"SELECT * FROM {trade_table} WHERE status = 'open' AND dry_run = 0"
             ).fetchall()
         except Exception:
             open_rows = []
@@ -106,7 +107,7 @@ def fetch_trade_stats(db_path: Path) -> dict:
         # ── Recent trades (last 5, any status) ───────────────────────────────
         try:
             recent_rows = cur.execute(
-                f"SELECT * FROM {trade_table} ORDER BY rowid DESC LIMIT 5"
+                f"SELECT * FROM {trade_table} WHERE dry_run = 0 ORDER BY rowid DESC LIMIT 5"
             ).fetchall()
         except Exception:
             recent_rows = []
