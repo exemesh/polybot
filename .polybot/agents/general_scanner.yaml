@@ -1,0 +1,27 @@
+# GeneralScanner Agent Charter
+agent: general_scanner
+display_name: GeneralScanner
+description: "Scans all active markets for short-duration high-return opportunities"
+
+allowed_market_categories:
+  - all    # GeneralScanner is category-agnostic
+
+allowed_api_domains:
+  - gamma-api.polymarket.com
+  - clob.polymarket.com
+
+max_single_trade_usd: 3.0
+max_daily_trades: 10
+min_edge_pct: 0.025
+max_position_pct: 0.08
+max_days_to_expiry: 7       # short-duration focus
+
+canary_eligible: true
+canary_market_slice: 0.10
+
+hitl_size_threshold_usd: 1.5
+hitl_confidence_threshold: 0.85
+
+created_at: 2026-03-23
+version: "1.0"
+notes: "Broad scanner — lower per-trade size to compensate for lower signal quality"
