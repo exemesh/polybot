@@ -29,7 +29,7 @@ import httpx
 logger = logging.getLogger("polybot.hitl")
 
 # ─── Thresholds ────────────────────────────────────────────────────────────────
-HITL_SIZE_THRESHOLD: float       = 1.00   # Trades >= this need approval
+HITL_SIZE_THRESHOLD: float       = 10.00  # Trades >= this need approval
 HITL_CONFIDENCE_THRESHOLD: float = 0.90   # Edge >= this needs approval
 HITL_TIMEOUT_SECONDS: int        = 300    # 5 min — auto-reject on timeout
 
