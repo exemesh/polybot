@@ -30,6 +30,14 @@ from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import JSONResponse
 
+# Load .env so DISCORD_PUBLIC_KEY is available when running via launchd
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    from pathlib import Path as _Path
+    _load_dotenv(_Path(__file__).parent.parent / ".env")
+except Exception:
+    pass
+
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_PATH = Path(os.getenv("DB_PATH", "data/polybot.db"))
 DISCORD_PUBLIC_KEY = os.getenv("DISCORD_PUBLIC_KEY", "")  # from Discord Developer Portal
