@@ -27,6 +27,12 @@ from typing import Optional
 
 logger = logging.getLogger("polybot.order_staging")
 
+try:
+    from core.forbidden_actions import check_trade as boundary_check_trade, log_boundary_summary
+    _BOUNDARIES_AVAILABLE = True
+except ImportError:
+    _BOUNDARIES_AVAILABLE = False
+
 MAX_ORDERS_PER_CYCLE = 5
 MIN_EDGE_AFTER_STAGING = 0.005
 MAX_PRICE = 0.97
@@ -96,6 +102,19 @@ class OrderStagingBuffer:
                 f"cycle_limit: cycle total would reach "
                 f"${self._cycle_usd_committed + order.size_usd:.2f} > ${MAX_TOTAL_CYCLE_USD}"
             )
+
+        # ── Forbidden Actions boundary check ────────────────────────────────
+        if _BOUNDARIES_AVAILABLE:
+            portfolio_value = getattr(self.portfolio, 'get_portfolio_value', lambda: 0)()
+            boundary_ok, boundary_reason = boundary_check_trade(
+                size_usd=order.size_usd,
+                price=order.price,
+                edge_pct=order.edge_pct,
+                portfolio_value=portfolio_value,
+                agent_name=order.strategy,
+            )
+            if not boundary_ok:
+                return f"boundary_violation: {boundary_reason}"
 
         if order.edge_pct < MIN_EDGE_AFTER_STAGING:
             return f"edge_too_low: {order.edge_pct:.3%} < {MIN_EDGE_AFTER_STAGING:.3%}"
