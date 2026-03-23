@@ -25,7 +25,7 @@ max_position_pct: 0.08
 canary_eligible: true
 canary_market_slice: 0.15
 
-hitl_size_threshold_usd: 1.5
+hitl_size_threshold_usd: 10.0
 hitl_confidence_threshold: 0.85
 
 created_at: 2026-03-23
