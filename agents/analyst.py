@@ -112,25 +112,38 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             conn.close()
             return stats
 
-        # Closed trades only for realized P&L stats
+        # Closed trades only for realized P&L stats — exclude dry-run paper trades
         try:
             closed_rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL "
+                f"SELECT * FROM {trade_table} WHERE dry_run = 0 AND pnl IS NOT NULL "
                 f"AND status IN ('won', 'lost', 'resolved') "
                 f"ORDER BY closed_at DESC LIMIT 1000"
             ).fetchall()
         except Exception:
-            closed_rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL LIMIT 1000"
-            ).fetchall()
+            # Fallback if dry_run column doesn't exist in this schema
+            try:
+                closed_rows = cur.execute(
+                    f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL "
+                    f"AND status IN ('won', 'lost', 'resolved') "
+                    f"ORDER BY closed_at DESC LIMIT 1000"
+                ).fetchall()
+            except Exception:
+                closed_rows = cur.execute(
+                    f"SELECT * FROM {trade_table} WHERE pnl IS NOT NULL LIMIT 1000"
+                ).fetchall()
 
-        # Open positions for unrealized P&L (only those with an expected pnl stored)
+        # Open positions for unrealized P&L — exclude dry-run paper trades
         try:
             open_rows = cur.execute(
-                f"SELECT * FROM {trade_table} WHERE status = 'open'"
+                f"SELECT * FROM {trade_table} WHERE dry_run = 0 AND status = 'open'"
             ).fetchall()
         except Exception:
-            open_rows = []
+            try:
+                open_rows = cur.execute(
+                    f"SELECT * FROM {trade_table} WHERE status = 'open'"
+                ).fetchall()
+            except Exception:
+                open_rows = []
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
