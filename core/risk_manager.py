@@ -66,7 +66,7 @@ class RiskManager:
             return False, f"Position too large: ${size_usd:.2f} > ${max_per_trade:.2f} max"
 
         # 4. Minimum portfolio to trade
-        if portfolio_value < 10.0:
+        if portfolio_value < 5.0:
             return False, f"Portfolio too small to trade: ${portfolio_value:.2f}"
 
         # 5. Sanity check on size
