@@ -21,7 +21,7 @@ logger = logging.getLogger("polybot.boundaries")
 # ─── Hard Caps (never exceeded regardless of portfolio size) ──────────────────
 MAX_SINGLE_TRADE_USD: float = 20.0       # Hard cap per single order
 MAX_DAILY_TRADES: int       = 20         # Max orders per calendar day
-MAX_POSITION_PCT: float     = 0.15       # Max 15% of portfolio in one position
+MAX_POSITION_PCT: float     = 0.75       # Max 75% of portfolio — aligned with settings
 MIN_EDGE_PCT: float         = 0.02       # Minimum 2% edge before fees to trade
 MAX_PRICE: float            = 0.97       # Never buy above 97¢
 MIN_PRICE: float            = 0.03       # Never buy below 3¢
