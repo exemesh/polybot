@@ -12,6 +12,7 @@ Trade rules:
 """
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -121,27 +122,50 @@ class GeneralScannerStrategy:
                     pass
             # Markets without end dates still get scanned but at lower priority
 
-            # Get order books for both sides
+            # ── Fast path: use Gamma API prices (already in market data, no extra calls) ──
+            # CLOB order books show 0.01/0.99 placeholders for binary markets (sports, elections).
+            # Gamma's outcomePrices / bestBid / bestAsk are the reliable source.
             analyzed += 1
-            yes_book = await self.poly_client.get_order_book(yes_id)
-            if not yes_book:
-                skipped_no_book += 1
-                continue
+            yes_mid = no_mid = spread = min_liquidity = total = None
 
-            no_book = await self.poly_client.get_order_book(no_id)
-            if not no_book:
-                skipped_no_book += 1
-                continue
+            outcome_prices_raw = market.get("outcomePrices")
+            gamma_bid = market.get("bestBid")
+            gamma_ask = market.get("bestAsk")
+            gamma_liq = float(market.get("liquidityClob") or market.get("liquidityNum") or 0)
+            gamma_spread = float(market.get("spread") or 0)
 
-            # Minimum liquidity check — AGGRESSIVE: $10 (was $20)
-            min_liquidity = min(yes_book.liquidity_usd, no_book.liquidity_usd)
+            if outcome_prices_raw and gamma_bid and gamma_ask:
+                try:
+                    prices = json.loads(outcome_prices_raw) if isinstance(outcome_prices_raw, str) else outcome_prices_raw
+                    y = float(prices[0])
+                    n = float(prices[1])
+                    sp = gamma_spread if gamma_spread else (float(gamma_ask) - float(gamma_bid))
+                    liq = gamma_liq if gamma_liq > 0 else float(market.get("volume24hr") or 0) / 1000
+                    if 0 < y < 1 and 0 < n < 1 and sp < 0.20:
+                        yes_mid, no_mid, spread, min_liquidity, total = y, n, sp, liq, y + n
+                except Exception:
+                    pass  # fall through to CLOB
+
+            if yes_mid is None:
+                # Fall back to CLOB order book
+                yes_book = await self.poly_client.get_order_book(yes_id)
+                if not yes_book:
+                    skipped_no_book += 1
+                    continue
+                no_book = await self.poly_client.get_order_book(no_id)
+                if not no_book:
+                    skipped_no_book += 1
+                    continue
+                min_liquidity = min(yes_book.liquidity_usd, no_book.liquidity_usd)
+                yes_mid = yes_book.mid_price
+                no_mid = no_book.mid_price
+                total = yes_mid + no_mid
+                spread = yes_book.spread
+
+            # Minimum liquidity check
             if min_liquidity < 10:
                 skipped_low_liq += 1
                 continue
-
-            yes_mid = yes_book.mid_price
-            no_mid = no_book.mid_price
-            total = yes_mid + no_mid
 
             # Time urgency bonus: markets closing sooner get priority
             time_bonus = 0
@@ -182,8 +206,6 @@ class GeneralScannerStrategy:
             # - Token price implies >= 30% potential return on resolution
             # - Market closes within 7 days (prefer < 72h)
             # - Spread is tight (market is active)
-            spread = yes_book.spread
-
             # For $1 trade at price P, if we win: payout = $1/P tokens * $1 = $1/P
             # Return = ($1/P - $1) / $1 = (1/P) - 1
             # For 30% return: need price <= 1/1.30 ≈ 0.77
