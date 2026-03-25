@@ -1,8 +1,8 @@
 {
   "mode": "live",
   "trading_enabled": true,
-  "updated_by": "apex",
-  "updated_at": "2026-03-25T14:16:01.788060+00:00",
-  "last_bot_run": null,
+  "updated_by": "bot",
+  "updated_at": "2026-03-25T14:49:53.381768+00:00",
+  "last_bot_run": "2026-03-25T14:49:53.381760+00:00",
   "halt_reason": null
 }
