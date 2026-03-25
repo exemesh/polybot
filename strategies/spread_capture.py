@@ -200,8 +200,8 @@ class SpreadCaptureStrategy:
         return opportunities
 
     async def _execute_trade(self, opp: Dict) -> bool:
-        """Execute spread capture trade. $10 per trade."""
-        trade_size = 10.00  # $10 per trade
+        """Execute spread capture trade. $5 per trade."""
+        trade_size = 5.00  # $5 per trade — fits $7 portfolio (75% cap = $5.38)
 
         approved, reason = self.risk_manager.approve_trade(
             trade_size, "spread_capture", opp["condition_id"])

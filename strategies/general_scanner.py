@@ -255,9 +255,9 @@ class GeneralScannerStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a paper/live trade for an opportunity.
-        All trades: $10 USD
+        All trades: $5 USD
         """
-        trade_size = 10.00
+        trade_size = 5.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "general_scanner", opp["condition_id"])
         if not approved:

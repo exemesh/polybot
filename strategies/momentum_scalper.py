@@ -225,8 +225,8 @@ class MomentumScalperStrategy:
         return opportunities
 
     async def _execute_trade(self, opp: Dict) -> bool:
-        """Execute trade. All trades $10 USD."""
-        trade_size = 10.00
+        """Execute trade. All trades $5 USD."""
+        trade_size = 5.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "momentum_scalper", opp["condition_id"])
         if not approved:
