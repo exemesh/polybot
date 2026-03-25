@@ -1,0 +1,42 @@
+{
+  "summary": {
+    "portfolio_value": 7.0,
+    "available_cash": 7.0,
+    "total_pnl": 0,
+    "realized_pnl": 0.0,
+    "unrealized_pnl": 0.0,
+    "daily_pnl": 0,
+    "pct_return": 0.0,
+    "deployed_capital": 0,
+    "win_rate": 0.0,
+    "total_trades": 0,
+    "closed_trades": 0,
+    "open_positions_count": 0,
+    "initial_capital": 7.0
+  },
+  "wallet": {
+    "matic": 0.0,
+    "usdc": 0.0,
+    "polymarket_cash": 0,
+    "address": "0xD65EeE836ca7bC1a80F87bF4bF48eA4018380BF2"
+  },
+  "trades": [],
+  "pnl_series": [],
+  "strategy_breakdown": [],
+  "open_positions": [],
+  "closed_positions": [],
+  "health": {
+    "bot_active": false,
+    "last_trade": null,
+    "timestamp": "2026-03-25T22:28:22.678334"
+  },
+  "exported_at": "2026-03-25T22:28:22.678339",
+  "control": {
+    "mode": "live",
+    "trading_enabled": true,
+    "halt_reason": null,
+    "updated_by": "bot",
+    "updated_at": "2026-03-25T22:28:22.676447+00:00",
+    "last_bot_run": "2026-03-25T22:28:22.676440+00:00"
+  }
+}
