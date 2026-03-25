@@ -30,7 +30,6 @@ dashboard/dashboard_data.json
 Thumbs.db
 
 # Runtime state files - never track these
-data/bot_control.json
 data/apex_last_startup.json
 data/recon_opportunity_buffer.json
 data/recon_last_posts.json
