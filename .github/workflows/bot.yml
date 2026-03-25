@@ -30,9 +30,8 @@ concurrency:
 
 permissions:
   contents: write
-  pages: write
-
-env:
+  
+  env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -159,20 +158,3 @@ jobs:
           path: data/polybot.db
           retention-days: 90
           overwrite: true
-
-      - name: Deploy dashboard to GitHub Pages
-        if: success()
-        run: |
-          mkdir -p /tmp/pages
-          cp dashboard/index.html /tmp/pages/index.html
-          cp dashboard/dashboard_data.json /tmp/pages/dashboard_data.json 2>/dev/null || true
-
-          git checkout --orphan gh-pages-deploy
-          git rm -rf . 2>/dev/null || true
-
-          cp /tmp/pages/index.html index.html
-          cp /tmp/pages/dashboard_data.json dashboard_data.json 2>/dev/null || true
-
-          git add index.html dashboard_data.json 2>/dev/null || true
-          git commit -m "Update dashboard data" --allow-empty
-          git push origin HEAD:gh-pages --force
