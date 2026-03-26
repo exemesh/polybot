@@ -181,7 +181,7 @@ class GeneralScannerStrategy:
             # AGGRESSIVE: wider threshold to catch more arbs
             if total < 0.998:
                 arb_edge = 1.0 - total - 0.004  # Subtract ~0.4% fees
-                if arb_edge > 0.001:  # > 0.1% edge — AGGRESSIVE (was 0.3%)
+                if arb_edge > 0.003:  # > 0.3% edge — safe margin above fees/slippage
                     # Calculate annualized return for ranking
                     return_pct = arb_edge / total * 100  # % return
                     opportunities.append({
@@ -277,9 +277,9 @@ class GeneralScannerStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a paper/live trade for an opportunity.
-        All trades: $5 USD
+        All trades: $15 USD
         """
-        trade_size = 5.00
+        trade_size = 15.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "general_scanner", opp["condition_id"])
         if not approved:

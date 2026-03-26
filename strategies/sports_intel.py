@@ -553,7 +553,7 @@ class SportsIntelStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a sports/event trade. $5 per trade."""
-        trade_size = 5.00  # $5 per trade — fits $7 portfolio (75% cap = $5.38)
+        trade_size = 15.00  # $15 per trade — fits $200 portfolio (75% cap = $150)
 
         approved, reason = self.risk_manager.approve_trade(
             trade_size, "sports_intel", opp["condition_id"])
