@@ -123,8 +123,10 @@ class Settings:
         self.DATA_DIR.mkdir(exist_ok=True)
         self.LOG_DIR.mkdir(exist_ok=True)
 
-        # Auto-disable market maker in GH Actions (needs continuous quoting)
+        # GitHub Actions servers are geoblocked by Polymarket — force dry run
+        # Live trading only runs on the local Mac via LaunchAgent
         if self.GH_ACTIONS:
+            self.DRY_RUN = True
             self.ENABLE_MARKET_MAKER = False
 
         if not self.DRY_RUN and not self.PRIVATE_KEY:

@@ -60,7 +60,7 @@ class AIForecasterStrategy:
         )
         self.traded_markets: Dict[str, float] = {}  # condition_id -> last_trade_time
 
-    async def run_once(self):
+    async def run_once(self, open_token_ids=None):
         """Single AI forecasting cycle."""
         if not self.ai_client.enabled:
             logger.info("AIForecaster: SKIPPED (no OPENAI_API_KEY)")
