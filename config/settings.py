@@ -94,7 +94,7 @@ class Settings:
     WEATHER_MAX_HOURS_OUT: int = 504             # 21 days max (was 14)
     WEATHER_MIN_HOURS_OUT: int = 4               # 4 hours minimum (was 12)
     WEATHER_SCAN_INTERVAL: int = 120             # Faster scanning (was 300)
-    WEATHER_MAX_BET_USD: float = 5.0             # $5 max bet — fits $7 portfolio
+    WEATHER_MAX_BET_USD: float = 15.0            # $15 max bet — fits $200 portfolio
 
     # ─── Market Maker Config ─────────────────────────────────────────
     MM_MIN_SPREAD: float = 0.03
