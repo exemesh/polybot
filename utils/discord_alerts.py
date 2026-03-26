@@ -56,8 +56,13 @@ class DiscordAlerts:
 
     # ── Internal helper ─────────────────────────────────────────────────────
 
-    async def _post_channel_message(self, channel_id: str, embed: dict) -> None:
-        """POST an embed to a Discord channel via the Bot API."""
+    async def _post_channel_message(self, channel_id: str, embed) -> None:
+        """POST a message to a Discord channel via the Bot API.
+
+        Accepts either a plain string (sent as message content) or a dict
+        (sent as a rich embed). Passing a string avoids the 400 error that
+        occurs when Discord receives a non-object inside the embeds array.
+        """
         if not self.bot_token or not channel_id:
             return
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
@@ -65,7 +70,10 @@ class DiscordAlerts:
             "Authorization": f"Bot {self.bot_token}",
             "Content-Type": "application/json",
         }
-        payload = {"embeds": [embed]}
+        if isinstance(embed, str):
+            payload = {"content": embed}
+        else:
+            payload = {"embeds": [embed]}
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(url, json=payload, headers=headers)
