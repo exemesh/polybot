@@ -383,11 +383,23 @@ class PolymarketClient:
             resp = client.post_order(signed, OrderType.FAK)
 
             if resp.get("success"):
-                return TradeResult(success=True, order_id=resp.get("orderID"), filled_price=None, filled_size=amount_usd)
+                order_id = resp.get("orderID")
+                logger.info(f"Market order placed: orderID={order_id} side={side} amount=${amount_usd:.2f} token={token_id[:16]}...")
+                return TradeResult(success=True, order_id=order_id, filled_price=None, filled_size=amount_usd)
             else:
+                err_msg = resp.get("errorMsg", "no errorMsg field")
+                logger.warning(
+                    f"Market order REJECTED by CLOB: side={side} amount=${amount_usd:.2f} "
+                    f"token={token_id[:16]}... | errorMsg={err_msg!r} | full_response={resp}"
+                )
                 return TradeResult(success=False, order_id=None, filled_price=None, filled_size=None,
-                                   error=resp.get("errorMsg"))
+                                   error=err_msg)
         except Exception as e:
+            logger.error(
+                f"Market order EXCEPTION: side={side} amount=${amount_usd:.2f} "
+                f"token={token_id[:16]}... | {type(e).__name__}: {e}",
+                exc_info=True,
+            )
             return TradeResult(success=False, order_id=None, filled_price=None, filled_size=None, error=str(e))
 
     async def cancel_order(self, order_id: str, dry_run: bool = True) -> bool:

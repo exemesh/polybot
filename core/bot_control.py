@@ -37,10 +37,31 @@ class ControlState:
         return not self.trading_enabled
 
 
+def _strip_conflict_markers(text: str) -> str:
+    """Remove git merge-conflict markers and keep the 'ours' (HEAD) section."""
+    if "<<<<<<< " not in text:
+        return text
+    logger.warning("Conflict markers detected in control file — keeping HEAD section")
+    lines = []
+    section = "ours"          # keep lines from HEAD side by default
+    for line in text.splitlines():
+        if line.startswith("<<<<<<< "):
+            section = "ours"
+        elif line.startswith("======="):
+            section = "theirs"
+        elif line.startswith(">>>>>>> "):
+            section = "ours"   # reset for any subsequent blocks
+        elif section == "ours":
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def load_control(path: str = CONTROL_PATH) -> ControlState:
-    """Load control state from JSON file. Returns defaults if file missing."""
+    """Load control state from JSON file. Returns defaults if file missing or corrupt."""
     try:
-        data = json.loads(Path(path).read_text())
+        raw = Path(path).read_text()
+        raw = _strip_conflict_markers(raw)
+        data = json.loads(raw)
         state = ControlState(
             mode=data.get("mode", "dry_run"),
             trading_enabled=data.get("trading_enabled", True),
