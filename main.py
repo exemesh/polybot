@@ -154,25 +154,42 @@ async def check_wallet_balance(address: str, clob_host: str = "https://clob.poly
             logger.debug(f"RPC {rpc_url} failed: {e}")
             continue
 
-    # ── 2. Check Polymarket cash balance via Gamma API ──
-    # Polymarket holds USDC inside proxy wallets / CTF Exchange.
-    # The actual "cash" is visible via the Gamma portfolio API.
+    # ── 2. Check Polymarket cash balance via authenticated CLOB API ──
+    # Polymarket holds USDC inside the CTF Exchange / proxy wallets — NOT in the
+    # wallet address itself. The only reliable source is the authenticated
+    # CLOB /balance-allowance endpoint, which reads what Polymarket holds for you.
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"https://gamma-api.polymarket.com/balances",
-                params={"address": address},
-                timeout=10
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, dict):
-                    balances["polymarket_cash"] = float(data.get("cash", data.get("balance", 0)))
-                elif isinstance(data, list) and len(data) > 0:
-                    balances["polymarket_cash"] = float(data[0].get("cash", data[0].get("balance", 0)))
-                logger.info(f"Polymarket cash balance: ${balances['polymarket_cash']:.2f}")
+        from core.key_vault import is_ready as _vault_ready, get_client as _vault_client
+        from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+        if _vault_ready():
+            _clob = _vault_client()
+            if _clob:
+                logger.debug("Fetching Polymarket balance via CLOB /balance-allowance ...")
+                creds = _clob.create_or_derive_api_creds()
+                _clob.set_api_creds(creds)
+                result = _clob.get_balance_allowance(
+                    params=BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                )
+                logger.debug(f"CLOB balance-allowance raw response: {result}")
+                if isinstance(result, dict):
+                    raw = result.get("balance", result.get("availableBalance", 0))
+                    bal = float(raw) if raw else 0.0
+                    # CLOB may return raw token units (USDC = 6 decimals, $200 → 200_000_000)
+                    # or human-readable. Use magnitude to distinguish.
+                    if bal > 10_000:
+                        bal = bal / 1_000_000
+                    balances["polymarket_cash"] = bal
+                    # For Magic wallets the on-chain USDC IS the same pool the CLOB
+                    # reports — zero it out to avoid double-counting in portfolio value.
+                    if bal > 0:
+                        balances["usdc"] = 0.0
+                    logger.info(f"Polymarket CLOB balance: ${balances['polymarket_cash']:.2f}")
+                else:
+                    logger.warning(f"CLOB balance-allowance unexpected response type: {type(result)} — {result}")
+        else:
+            logger.warning("KeyVault not ready at balance check — PRIVATE_KEY may not be loaded")
     except Exception as e:
-        logger.debug(f"Polymarket balance API failed: {e}")
+        logger.warning(f"CLOB balance-allowance check failed: {e}", exc_info=True)
 
     # Total USDC = on-chain + Polymarket deposits
     total = balances["usdc"] + balances["polymarket_cash"]
