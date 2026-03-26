@@ -141,6 +141,7 @@ class SportsIntelStrategy:
         """
         # AGGRESSIVE: Search sports + geopolitics + trending events
         all_markets = []
+        seen_condition_ids = set()
         search_terms = [
             # Sports
             "NBA", "NFL", "soccer", "UFC", "tennis", "MLB",
@@ -161,8 +162,9 @@ class SportsIntelStrategy:
             try:
                 markets = await self.poly_client.search_markets(term)
                 for m in markets:
-                    cid = m.get("condition_id", "")
-                    if cid and cid not in [x.get("condition_id") for x in all_markets]:
+                    cid = m.get("condition_id") or ""
+                    if cid and cid not in seen_condition_ids:
+                        seen_condition_ids.add(cid)
                         all_markets.append(m)
                 await asyncio.sleep(0.2)
             except Exception as e:
@@ -180,8 +182,9 @@ class SportsIntelStrategy:
                     if resp.status_code == 200:
                         tagged = resp.json()
                         for m in tagged:
-                            cid = m.get("condition_id", "")
-                            if cid and cid not in [x.get("condition_id") for x in all_markets]:
+                            cid = m.get("condition_id") or ""
+                            if cid and cid not in seen_condition_ids:
+                                seen_condition_ids.add(cid)
                                 all_markets.append(m)
                     await asyncio.sleep(0.2)
         except Exception as e:

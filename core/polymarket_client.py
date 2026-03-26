@@ -124,8 +124,8 @@ class PolymarketClient:
                         try:
                             creds = client.create_or_derive_api_creds()
                             client.set_api_creds(creds)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"KeyVault create_or_derive_api_creds failed: {e}")
                         self._client = client
                         logger.info("CLOB client authenticated via KeyVault")
                         return self._client
@@ -141,8 +141,12 @@ class PolymarketClient:
                         chain_id=self.settings.CHAIN_ID,
                         signature_type=0,  # EOA wallet
                     )
-                    creds = self._client.create_or_derive_api_creds()
-                    self._client.set_api_creds(creds)
+                    try:
+                        creds = self._client.create_or_derive_api_creds()
+                        self._client.set_api_creds(creds)
+                    except Exception as e:
+                        logger.critical(f"CLOB client create_or_derive_api_creds failed with PRIVATE_KEY: {e}")
+                        raise
                     logger.warning(
                         "CLOB client using PRIVATE_KEY from settings (legacy). "
                         "Prefer key_vault.init_vault() at startup."
