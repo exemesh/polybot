@@ -203,13 +203,17 @@ class SportsIntelStrategy:
                 continue
 
             # CRITICAL: Require end_date and reject markets > 30 days out
-            end_date = m.get("end_date_iso", m.get("endDateIso", ""))
+            # Gamma API returns endDate (full ISO datetime) — fall back to endDateIso (date only)
+            end_date = m.get("endDate") or m.get("end_date_iso") or m.get("endDateIso") or ""
             if not end_date:
                 skipped_no_date += 1
                 continue
 
             try:
                 resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                # endDateIso returns date-only strings (no timezone) — attach UTC
+                if resolution_dt.tzinfo is None:
+                    resolution_dt = resolution_dt.replace(tzinfo=timezone.utc)
                 hours_until = (resolution_dt - now).total_seconds() / 3600
                 if hours_until < 2:  # Too close to expiry
                     continue

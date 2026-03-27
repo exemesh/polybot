@@ -106,11 +106,14 @@ class GeneralScannerStrategy:
 
             # ═══ 30-DAY MAX TIMELINE — aggressive capital turnover ═══
             # Only trade markets resolving within 30 days
-            end_date = market.get("end_date_iso", "")
+            # Gamma API returns endDate (full ISO datetime) — fall back to endDateIso (date only)
+            end_date = market.get("endDate") or market.get("end_date_iso") or market.get("endDateIso") or ""
             hours_until = None
             if end_date:
                 try:
                     resolution_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                    if resolution_dt.tzinfo is None:
+                        resolution_dt = resolution_dt.replace(tzinfo=timezone.utc)
                     hours_until = (resolution_dt - now).total_seconds() / 3600
                     if hours_until < 2:  # Too close to expiry
                         skipped_too_close += 1
