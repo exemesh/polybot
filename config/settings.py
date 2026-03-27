@@ -60,7 +60,7 @@ class Settings:
     INITIAL_CAPITAL: float = field(default_factory=lambda: float(os.getenv("INITIAL_CAPITAL", "100")))
     MAX_POSITION_PCT: float = 0.75            # 75% per trade — allows full $5 trades on $7 portfolio
     MAX_GLOBAL_EXPOSURE_PCT: float = 0.75     # 75% deployed — allows $5 trades on $7 portfolio
-    DAILY_LOSS_LIMIT_PCT: float = 0.10        # 10% daily loss limit — protect capital
+    DAILY_LOSS_LIMIT_PCT: float = 0.40        # 40% daily loss limit — allows positions to breathe on $200 portfolio
     MAX_SIMULTANEOUS_POSITIONS: int = 15      # Up to 15 positions — focused portfolio
     KELLY_FRACTION: float = 0.25              # 25% Kelly — true quarter-Kelly
 
