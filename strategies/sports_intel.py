@@ -100,7 +100,7 @@ class SportsIntelStrategy:
         self.traded_markets: Dict[str, float] = {}
         self.odds_api_key = getattr(settings, 'ODDS_API_KEY', '') or ''
 
-    async def run_once(self):
+    async def run_once(self, open_token_ids=None):
         """Single scan-and-trade cycle."""
         logger.info("SportsIntel: scanning sports markets with external data")
         try:
