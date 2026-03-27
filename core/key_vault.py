@@ -58,7 +58,7 @@ def get_client():
             _CLOB_HOST,
             key=_PRIVATE_KEY,
             chain_id=_CHAIN_ID,
-            signature_type=1,  # Magic wallet (Google/email login)
+            signature_type=0,  # EOA wallet (MetaMask / standard private key)
         )
         return client
     except Exception as exc:

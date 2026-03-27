@@ -139,7 +139,7 @@ class PolymarketClient:
                         self.settings.CLOB_HOST,
                         key=self.settings.PRIVATE_KEY,
                         chain_id=self.settings.CHAIN_ID,
-                        signature_type=1,  # Magic wallet (Google/email login)
+                        signature_type=0,  # EOA wallet (MetaMask / standard private key)
                     )
                     try:
                         creds = self._client.create_or_derive_api_creds()
