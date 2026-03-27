@@ -380,7 +380,8 @@ class PolymarketClient:
         try:
             client = self._get_client()
             side_const = BUY if side.upper() == "BUY" else SELL
-            order_args = MarketOrderArgs(token_id=token_id, amount=amount_usd, side=side_const, neg_risk=neg_risk)
+            # MarketOrderArgs does not support neg_risk — neg_risk only applies to limit OrderArgs
+            order_args = MarketOrderArgs(token_id=token_id, amount=amount_usd, side=side_const)
             signed = client.create_market_order(order_args)
             # Use FAK (Fill and Kill) — matches user's Polymarket settings
             resp = client.post_order(signed, OrderType.FAK)
