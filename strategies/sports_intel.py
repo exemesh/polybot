@@ -420,6 +420,7 @@ class SportsIntelStrategy:
                             "side": "BOTH",
                             "liquidity": min_liq,
                             "hours_until": hours_until,
+                            "neg_risk": market.get("negRisk", False),
                             "score": return_pct * time_mult,  # Sports arb = premium
                             "source": "polymarket_internal",
                         })
@@ -445,6 +446,7 @@ class SportsIntelStrategy:
                                 "hours_until": hours_until,
                                 "score": return_pct * min(1.0, min_liq / 200),
                                 "source": "polymarket_analysis",
+                                "neg_risk": market.get("negRisk", False),
                             })
                     elif 0.10 <= no_mid <= 0.65 and min_liq > 50 and no_book.spread < 0.08:
                         return_pct = (1.0 / no_mid - 1.0) * 100
@@ -464,6 +466,7 @@ class SportsIntelStrategy:
                                 "hours_until": hours_until,
                                 "score": return_pct * min(1.0, min_liq / 200),
                                 "source": "polymarket_analysis",
+                                "neg_risk": market.get("negRisk", False),
                             })
 
             await asyncio.sleep(0.2)
@@ -569,18 +572,19 @@ class SportsIntelStrategy:
             return False
 
         source = opp.get("source", "analysis")
+        neg_risk = opp.get("neg_risk", False)
 
         if opp["side"] == "BOTH":
             half = trade_size / 2
             logger.info(
                 f"[SPORTS] ARB | {opp['question'][:50]} | "
                 f"YES: {opp['yes_price']:.3f} + NO: {opp['no_price']:.3f} | "
-                f"Return: {opp['return_pct']:.1f}% | Source: {source}"
+                f"Return: {opp['return_pct']:.1f}% | Source: {source} | neg_risk={neg_risk}"
             )
             yes_r = await self.poly_client.place_market_order(
-                opp["yes_token_id"], half, "BUY", self.settings.DRY_RUN)
+                opp["yes_token_id"], half, "BUY", self.settings.DRY_RUN, neg_risk=neg_risk)
             no_r = await self.poly_client.place_market_order(
-                opp["no_token_id"], half, "BUY", self.settings.DRY_RUN)
+                opp["no_token_id"], half, "BUY", self.settings.DRY_RUN, neg_risk=neg_risk)
 
             if yes_r.success and no_r.success:
                 expected_pnl = trade_size * opp["edge"]  # used for logging only
@@ -609,7 +613,7 @@ class SportsIntelStrategy:
             )
 
             result = await self.poly_client.place_market_order(
-                token_id, trade_size, "BUY", self.settings.DRY_RUN)
+                token_id, trade_size, "BUY", self.settings.DRY_RUN, neg_risk=neg_risk)
 
             if result.success:
                 trade = Trade(

@@ -317,11 +317,12 @@ class PolymarketClient:
             return []
 
     async def place_limit_order(
-        self, token_id: str, price: float, size: float, side: str, dry_run: bool = True
+        self, token_id: str, price: float, size: float, side: str, dry_run: bool = True,
+        neg_risk: bool = False
     ) -> TradeResult:
         """Place a limit order on the CLOB."""
         side_const = BUY if side.upper() == "BUY" else SELL
-        logger.info(f"{'[DRY RUN] ' if dry_run else ''}LIMIT {side} {size:.2f} @ ${price:.4f} token={token_id[:16]}...")
+        logger.info(f"{'[DRY RUN] ' if dry_run else ''}LIMIT {side} {size:.2f} @ ${price:.4f} token={token_id[:16]}... neg_risk={neg_risk}")
 
         if dry_run:
             # Simulated slippage for realistic paper trading
@@ -341,6 +342,7 @@ class PolymarketClient:
                 price=price,
                 size=size,
                 side=side_const,
+                neg_risk=neg_risk,
             )
             signed = client.create_order(order_args)
             resp = client.post_order(signed, OrderType.GTC)
@@ -358,10 +360,11 @@ class PolymarketClient:
             return TradeResult(success=False, order_id=None, filled_price=None, filled_size=None, error=str(e))
 
     async def place_market_order(
-        self, token_id: str, amount_usd: float, side: str, dry_run: bool = True
+        self, token_id: str, amount_usd: float, side: str, dry_run: bool = True,
+        neg_risk: bool = False
     ) -> TradeResult:
         """Place a market order (uses FAK for best fill)."""
-        logger.info(f"{'[DRY RUN] ' if dry_run else ''}MARKET {side} ${amount_usd:.2f} token={token_id[:16]}...")
+        logger.info(f"{'[DRY RUN] ' if dry_run else ''}MARKET {side} ${amount_usd:.2f} token={token_id[:16]}... neg_risk={neg_risk}")
 
         if dry_run:
             # Simulated slippage for realistic paper trading
@@ -377,7 +380,7 @@ class PolymarketClient:
         try:
             client = self._get_client()
             side_const = BUY if side.upper() == "BUY" else SELL
-            order_args = MarketOrderArgs(token_id=token_id, amount=amount_usd, side=side_const)
+            order_args = MarketOrderArgs(token_id=token_id, amount=amount_usd, side=side_const, neg_risk=neg_risk)
             signed = client.create_market_order(order_args)
             # Use FAK (Fill and Kill) — matches user's Polymarket settings
             resp = client.post_order(signed, OrderType.FAK)
