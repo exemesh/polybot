@@ -429,8 +429,12 @@ class Portfolio:
                 else:
                     return None
 
-                resolved = m.get("resolved", False) or m.get("closed", False)
+                # Only treat as resolved if explicitly resolved AND has a winning outcome.
+                # "closed" alone means trading is paused — NOT resolved (e.g. pre-game kickoff).
+                resolved = m.get("resolved", False)
                 winning_outcome = m.get("winningOutcome", m.get("winning_outcome"))
+                if not winning_outcome:
+                    resolved = False
 
                 # Get outcome prices (1.0 for winner, 0.0 for loser)
                 outcome_prices = {}
