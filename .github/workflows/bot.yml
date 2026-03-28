@@ -1,8 +1,6 @@
 name: PolyBot Trading
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       mode:
