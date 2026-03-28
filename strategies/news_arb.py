@@ -313,6 +313,10 @@ class NewsArbitrageStrategy:
 
         return (best_item, best_score, best_dir) if best_item else None
 
+    async def cleanup(self) -> None:
+        """Cleanup hook called by main after each cycle."""
+        logger.info(f"NewsArb cleanup: {len(self.traded_markets)} markets traded this session")
+
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a news arbitrage trade."""
         approved, reason = self.risk_manager.approve_trade(
