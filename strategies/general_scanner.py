@@ -35,8 +35,8 @@ class GeneralScannerStrategy:
         self.poly_client = PolymarketClient(settings)
         self.traded_markets: Dict[str, float] = {}  # condition_id -> last_trade_time
 
-    async def run_once(self):
-        """Single scan-and-trade cycle for GitHub Actions."""
+    async def run_once(self, open_token_ids=None):
+        """Single scan-and-trade cycle."""
         logger.info("GeneralScanner: scanning for SHORT-DURATION high-return markets")
         try:
             opportunities = await self._scan_markets()

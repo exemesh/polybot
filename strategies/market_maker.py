@@ -58,7 +58,7 @@ class MarketMakerStrategy:
                 logger.error(f"Market maker error: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
-    async def run_once(self):
+    async def run_once(self, open_token_ids=None):
         """Single cycle - discover and place initial quotes only."""
         logger.info("MarketMakerStrategy: running single cycle (limited in cron mode)")
         try:

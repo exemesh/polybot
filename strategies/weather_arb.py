@@ -139,8 +139,8 @@ class WeatherArbStrategy:
                 logger.error(f"Weather strategy error: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
-    async def run_once(self):
-        """Single scan-and-trade cycle for GitHub Actions."""
+    async def run_once(self, open_token_ids=None):
+        """Single scan-and-trade cycle."""
         logger.info("WeatherArbStrategy: running single scan")
         try:
             opportunities = await self._scan_opportunities()

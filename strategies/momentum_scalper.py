@@ -37,7 +37,7 @@ class MomentumScalperStrategy:
         self.poly_client = PolymarketClient(settings)
         self.traded_markets: Dict[str, float] = {}
 
-    async def run_once(self):
+    async def run_once(self, open_token_ids=None):
         """Single scan-and-trade cycle."""
         logger.info("MomentumScalper: hunting near-expiry opportunities")
         try:

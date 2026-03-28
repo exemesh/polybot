@@ -110,8 +110,8 @@ class CrossPlatformArbStrategy:
                 logger.error(f"Arb strategy error: {e}", exc_info=True)
                 await asyncio.sleep(30)
 
-    async def run_once(self):
-        """Single scan-and-trade cycle for GitHub Actions."""
+    async def run_once(self, open_token_ids=None):
+        """Single scan-and-trade cycle."""
         logger.info("CrossPlatformArbStrategy: running single scan")
         try:
             type1_opps = await self._scan_single_platform_arb()

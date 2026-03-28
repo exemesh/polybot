@@ -113,7 +113,7 @@ class ProfitTakerStrategy:
         # Once peak-based trailing is active, this is updated each cycle too.
         self._trailing_stops: Dict[int, float] = {}
 
-    async def run_once(self):
+    async def run_once(self, open_token_ids=None):
         """Check all open positions and take action where targets are hit."""
         open_positions = self.portfolio.get_open_positions()
         if not open_positions:
