@@ -185,6 +185,37 @@ async def check_wallet_balance(address: str, clob_host: str = "https://clob.poly
                     if bal > 0:
                         balances["usdc"] = 0.0
                     logger.info(f"Polymarket CLOB balance: ${balances['polymarket_cash']:.2f}")
+
+                    # If CLOB shows $0 but on-chain USDC exists, call update_balance_allowance
+                    # to tell Polymarket to re-sync the on-chain allowance.
+                    if bal == 0 and balances.get("usdc", 0) > 0:
+                        logger.info(
+                            f"CLOB $0 but on-chain ${balances['usdc']:.2f} — "
+                            "calling update_balance_allowance to sync..."
+                        )
+                        try:
+                            _clob.update_balance_allowance(
+                                params=BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                            )
+                            result2 = _clob.get_balance_allowance(
+                                params=BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+                            )
+                            if isinstance(result2, dict):
+                                raw2 = result2.get("balance", result2.get("availableBalance", 0))
+                                bal2 = float(raw2) if raw2 else 0.0
+                                if bal2 > 10_000:
+                                    bal2 = bal2 / 1_000_000
+                                if bal2 > 0:
+                                    balances["polymarket_cash"] = bal2
+                                    balances["usdc"] = 0.0
+                                    logger.info(f"Allowance sync OK — CLOB now ${bal2:.2f}")
+                                else:
+                                    logger.warning(
+                                        f"CLOB still $0 after sync. On-chain ${balances.get('usdc', 0):.2f} "
+                                        "USDC needs manual deposit at polymarket.com"
+                                    )
+                        except Exception as _sync_err:
+                            logger.warning(f"update_balance_allowance failed: {_sync_err}")
                 else:
                     logger.warning(f"CLOB balance-allowance unexpected response type: {type(result)} — {result}")
         else:
@@ -360,6 +391,23 @@ class PolyBot:
         except Exception as e:
             logger.error(f"Profit taker failed: {e}", exc_info=True)
 
+        # ── Guard: skip new trades when CLOB balance is too low ──
+        _clob_cash = balances.get("polymarket_cash", 0)
+        _min_trade = 5.0  # minimum USDC needed to attempt a trade
+        _skip_strategies = not self.settings.DRY_RUN and _clob_cash < _min_trade
+        if _skip_strategies:
+            _on_chain = balances.get("usdc", 0)
+            logger.warning(
+                f"CLOB balance ${_clob_cash:.2f} < ${_min_trade:.0f} minimum — "
+                f"skipping new trades this cycle. On-chain USDC: ${_on_chain:.2f}. "
+                f"Deposit at polymarket.com to resume trading."
+            )
+            await send_error_alert(
+                f"Trading paused: Polymarket CLOB ${_clob_cash:.2f} (need ≥${_min_trade:.0f}). "
+                f"On-chain wallet has ${_on_chain:.2f} USDC — deposit at polymarket.com.",
+                "low_balance"
+            )
+
         # Run each strategy's single scan
         # Fetch open position token IDs once and pass to each strategy so they
         # can skip markets where a position already exists (deduplication).
@@ -367,6 +415,8 @@ class PolyBot:
         logger.info(f"Position deduplication: {len(open_token_ids)} open token IDs loaded")
 
         for strategy in self.strategies:
+            if _skip_strategies:
+                continue
             try:
                 # Inject the current set of open token IDs if the strategy
                 # accepts it, otherwise fall back to the no-arg call.
@@ -478,8 +528,25 @@ def main():
     )
     args = parser.parse_args()
 
-    bot = PolyBot(export_dashboard=args.export_dashboard)
-    asyncio.run(bot.run_once())
+    # ── Run-lock: prevent overlapping cycles ──────────────────────────────────
+    # launchd fires every 5 min but a full scan can take longer; if the
+    # previous instance is still running, skip rather than double-trade.
+    import fcntl
+    lock_path = Path("data/.polybot.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fh = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Another polybot instance is already running — skipping this cycle.", flush=True)
+        lock_fh.close()
+        return
+    try:
+        bot = PolyBot(export_dashboard=args.export_dashboard)
+        asyncio.run(bot.run_once())
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
 
 
 if __name__ == "__main__":
