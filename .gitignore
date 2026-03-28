@@ -38,3 +38,8 @@ data/guardian_sent_alerts.json
 data/scout_last_opportunities.json
 data/xrp_price_cache.json
 data/polybot.db
+data/bot_control.json
+data/recalibration.json
+data/auto_research_log.json
+data/.polybot.lock
+*.bak
