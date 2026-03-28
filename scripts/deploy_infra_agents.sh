@@ -24,6 +24,8 @@ SERVICES=(
     "com.polybot.log-relay"
     "com.polybot.dep-watchdog"
     "com.polybot.infra-health"
+    "com.polybot.api-server"
+    "com.polybot.dashboard"
 )
 
 for SVC in "${SERVICES[@]}"; do
@@ -55,3 +57,5 @@ echo "✅ Infra agents deployed. Schedule:"
 echo "   log-relay     → every 5 minutes (ships errors/trades to Discord)"
 echo "   dep-watchdog  → every Sunday 09:00 WAT (Python/pip/brew update check)"
 echo "   infra-health  → every day 07:30 WAT (deep health check + Discord report)"
+echo "   api-server    → always-on at https://api.exemesh.dev"
+echo "   dashboard     → always-on at https://exemesh.dev"
