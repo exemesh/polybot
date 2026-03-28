@@ -428,7 +428,9 @@ class SportsIntelStrategy:
                 # Value bets: ONLY when hours_until is known and < 30 days
                 # (already filtered in _find_sports_markets, but double-check)
                 if hours_until and hours_until <= 2160:
-                    if 0.10 <= yes_mid <= 0.65 and min_liq > 50 and yes_book.spread < 0.08:
+                    # Only trade in the 20-65% range — below 20% means the market
+                    # already priced the outcome as unlikely (buying is gambling, not arb).
+                    if 0.20 <= yes_mid <= 0.65 and min_liq > 50 and yes_book.spread < 0.08:
                         return_pct = (1.0 / yes_mid - 1.0) * 100
                         if return_pct >= 30:
                             opportunities.append({
@@ -448,7 +450,7 @@ class SportsIntelStrategy:
                                 "source": "polymarket_analysis",
                                 "neg_risk": market.get("negRisk", False),
                             })
-                    elif 0.10 <= no_mid <= 0.65 and min_liq > 50 and no_book.spread < 0.08:
+                    elif 0.20 <= no_mid <= 0.65 and min_liq > 50 and no_book.spread < 0.08:
                         return_pct = (1.0 / no_mid - 1.0) * 100
                         if return_pct >= 30:
                             opportunities.append({

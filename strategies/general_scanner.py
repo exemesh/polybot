@@ -214,47 +214,52 @@ class GeneralScannerStrategy:
             # For 30% return: need price <= 1/1.30 ≈ 0.77
             # But we also need actual conviction — not just cheap tokens
 
-            # Buy YES side: value opportunity
-            # REQUIRE end_date for value bets — no longshots without known resolution
-            # AGGRESSIVE: wider price range, lower return threshold
-            if 0.05 <= yes_mid <= 0.85 and spread < 0.15 and hours_until is not None:
-                potential_return = (1.0 / yes_mid - 1.0) * 100  # % return if YES wins
-                if potential_return >= 15 and min_liquidity > 10:  # 15% min (was 30%)
-                    opportunities.append({
-                        "type": "value",
-                        "condition_id": condition_id,
-                        "question": market.get("question", ""),
-                        "yes_token_id": yes_id,
-                        "no_token_id": no_id,
-                        "yes_price": yes_mid,
-                        "no_price": no_mid,
-                        "edge": potential_return / 100,
-                        "return_pct": potential_return,
-                        "liquidity": min_liquidity,
-                        "side": "BUY_YES",
-                        "hours_until": hours_until,
-                        "score": potential_return * (1 + time_bonus) * min(1.0, min_liquidity / 100),
-                    })
+            # Buy YES or NO: value opportunity
+            # ONLY trade in the 20-80% uncertainty zone.
+            # Tokens below 20¢ are cheap because the market already knows they'll lose —
+            # buying them is not "value", it's buying longshots. Tokens above 80¢ have
+            # too little return potential to justify the risk.
+            # This prevents the scanner from buying 5-7¢ "lottery tickets" that look
+            # attractive purely because the potential % return is huge.
+            MIN_PRICE = 0.20
+            MAX_PRICE = 0.80
 
-            # Buy NO side: value opportunity
-            elif 0.05 <= no_mid <= 0.85 and spread < 0.15 and hours_until is not None:
-                potential_return = (1.0 / no_mid - 1.0) * 100
-                if potential_return >= 15 and min_liquidity > 10:  # 15% min (was 30%)
-                    opportunities.append({
-                        "type": "value",
-                        "condition_id": condition_id,
-                        "question": market.get("question", ""),
-                        "yes_token_id": yes_id,
-                        "no_token_id": no_id,
-                        "yes_price": yes_mid,
-                        "no_price": no_mid,
-                        "edge": potential_return / 100,
-                        "return_pct": potential_return,
-                        "liquidity": min_liquidity,
-                        "side": "BUY_NO",
-                        "hours_until": hours_until,
-                        "score": potential_return * (1 + time_bonus) * min(1.0, min_liquidity / 100),
-                    })
+            best_side = None
+            best_price = None
+            best_return = 0
+
+            if MIN_PRICE <= yes_mid <= MAX_PRICE and spread < 0.15 and hours_until is not None:
+                yes_return = (1.0 / yes_mid - 1.0) * 100
+                if yes_return >= 25 and min_liquidity > 50:
+                    best_side = "BUY_YES"
+                    best_price = yes_mid
+                    best_return = yes_return
+
+            if MIN_PRICE <= no_mid <= MAX_PRICE and spread < 0.15 and hours_until is not None:
+                no_return = (1.0 / no_mid - 1.0) * 100
+                if no_return >= 25 and min_liquidity > 50:
+                    # Pick the side with higher return potential
+                    if best_side is None or no_return > best_return:
+                        best_side = "BUY_NO"
+                        best_price = no_mid
+                        best_return = no_return
+
+            if best_side:
+                opportunities.append({
+                    "type": "value",
+                    "condition_id": condition_id,
+                    "question": market.get("question", ""),
+                    "yes_token_id": yes_id,
+                    "no_token_id": no_id,
+                    "yes_price": yes_mid,
+                    "no_price": no_mid,
+                    "edge": best_return / 100,
+                    "return_pct": best_return,
+                    "liquidity": min_liquidity,
+                    "side": best_side,
+                    "hours_until": hours_until,
+                    "score": best_return * (1 + time_bonus) * min(1.0, min_liquidity / 100),
+                })
 
             # Rate limit: don't hammer the API
             if analyzed % 10 == 0:
