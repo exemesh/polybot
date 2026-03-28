@@ -21,6 +21,7 @@ if not PRIVATE_KEY:
 
 try:
     from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import AssetType
     from py_clob_client.constants import POLYGON
 except ImportError:
     print("ERROR: py-clob-client not installed. Run: pip3.11 install py-clob-client")
@@ -32,20 +33,26 @@ CHAIN_ID = POLYGON
 print("Connecting to Polymarket CLOB...")
 client = ClobClient(HOST, key=PRIVATE_KEY, chain_id=CHAIN_ID)
 
-print("Checking current balance/allowance...")
+print("Checking current USDC balance/allowance...")
 try:
-    bal = client.get_balance_allowance(asset_type=None)
-    print(f"Current state: {bal}")
+    bal = client.get_balance_allowance(asset_type=AssetType.USDC)
+    print(f"USDC state: {bal}")
 except Exception as e:
-    print(f"Balance check: {e}")
+    print(f"Balance check error: {e}")
 
-print("\nSetting USDC allowance for CLOB exchange contract...")
+print("\nApproving USDC allowance for CLOB exchange contract...")
 try:
-    result = client.set_allowance(asset_type=None)
-    print(f"Allowance set: {result}")
+    result = client.update_balance_allowance(asset_type=AssetType.USDC)
+    print(f"Result: {result}")
     print("\n✅ Done — CLOB should now see your USDC balance.")
-    print("Run the bot and it will start trading on the next cycle.")
 except Exception as e:
-    print(f"ERROR setting allowance: {e}")
-    print("\nAlternative: go to polymarket.com → Profile → Deposit → deposit any amount via the UI.")
-    sys.exit(1)
+    print(f"update_balance_allowance failed: {e}")
+    # Try the conditional token approval too
+    try:
+        result2 = client.update_balance_allowance(asset_type=AssetType.CONDITIONAL)
+        print(f"Conditional result: {result2}")
+        print("\n✅ Done.")
+    except Exception as e2:
+        print(f"All approval methods failed: {e2}")
+        print("\nManual fix: go to polymarket.com → click your balance → Deposit → deposit $1")
+        sys.exit(1)
