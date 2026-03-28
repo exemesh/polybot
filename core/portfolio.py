@@ -393,7 +393,9 @@ class Portfolio:
                 continue
 
             status = market_status[mid]
-            if not status.get("resolved", False) and not status.get("closed", False):
+            # Only close positions when market is truly resolved (has a winning outcome).
+            # closed=True alone means trading is paused (e.g. pre-game) — NOT resolved.
+            if not status.get("resolved", False):
                 continue
 
             # Market is resolved — calculate P&L
