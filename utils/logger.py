@@ -15,6 +15,7 @@ def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
 
     if not root_polybot.handlers:
         root_polybot.setLevel(logging.DEBUG)
+        root_polybot.propagate = False  # prevent double-logging via Python root logger
 
         fmt = logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
