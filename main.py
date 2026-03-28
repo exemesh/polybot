@@ -34,6 +34,7 @@ from strategies.general_scanner import GeneralScannerStrategy
 from strategies.momentum_scalper import MomentumScalperStrategy
 from strategies.spread_capture import SpreadCaptureStrategy
 from strategies.sports_intel import SportsIntelStrategy
+from strategies.news_arb import NewsArbitrageStrategy
 from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
 from core.win_rate_monitor import check as check_win_rate, format_discord_alert, load_recalibration
@@ -279,6 +280,8 @@ class PolyBot:
             self.strategies.append(SpreadCaptureStrategy(self.settings, self.portfolio, self.risk_manager))
         if self.settings.ENABLE_SPORTS_INTEL:
             self.strategies.append(SportsIntelStrategy(self.settings, self.portfolio, self.risk_manager))
+        if self.settings.ENABLE_NEWS_ARB:
+            self.strategies.append(NewsArbitrageStrategy(self.settings, self.portfolio, self.risk_manager))
         if self.settings.ENABLE_AI_FORECASTER:
             self.strategies.append(AIForecasterStrategy(self.settings, self.portfolio, self.risk_manager))
 
