@@ -11,6 +11,9 @@
         <string>/Users/brij/polybot/scripts/api_server.py</string>
     </array>
 
+    <key>WorkingDirectory</key>
+    <string>/Users/brij/polybot</string>
+
     <!-- Keep alive — this is a persistent server -->
     <key>KeepAlive</key>
     <true/>

@@ -250,7 +250,11 @@ class WeatherArbStrategy:
 
     async def _execute_opportunity(self, opp: Dict):
         portfolio_val = self.portfolio.get_portfolio_value()
-        odds = (1 - opp["market_price"]) / opp["market_price"]
+        market_price = opp["market_price"]
+        if not market_price or market_price <= 0:
+            logger.debug(f"Skipping weather trade: market_price={market_price} (zero/invalid)")
+            return
+        odds = (1 - market_price) / market_price
         size = self.risk_manager.kelly_size(opp["edge"], odds, portfolio_val)
         size = min(size, self.settings.WEATHER_MAX_BET_USD)
 

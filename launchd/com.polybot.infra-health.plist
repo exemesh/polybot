@@ -20,6 +20,9 @@
         <integer>30</integer>
     </dict>
 
+    <key>WorkingDirectory</key>
+    <string>/Users/brij/polybot</string>
+
     <key>RunAtLoad</key>
     <false/>
 
