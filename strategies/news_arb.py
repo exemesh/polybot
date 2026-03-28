@@ -25,7 +25,7 @@ from config.settings import Settings
 from core.portfolio import Portfolio
 from core.risk_manager import RiskManager
 from core.polymarket_client import PolymarketClient
-from core.trade import Trade
+from core.portfolio import Trade
 
 logger = logging.getLogger("polybot.news_arb")
 
