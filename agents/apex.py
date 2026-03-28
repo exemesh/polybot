@@ -91,10 +91,15 @@ async def run_apex() -> None:
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
 
-    # Only send startup message once per calendar day
+    # Only send startup message once per calendar day AND only during morning/evening windows
+    # Morning: 07:00-09:00 UTC (07:00-09:00 WAT) | Evening: 16:00-18:00 UTC (16:00-18:00 WAT)
+    current_hour = now.hour
+    in_briefing_window = (7 <= current_hour < 9) or (16 <= current_hour < 18)
     last_startup_date = _load_last_startup_date()
     if last_startup_date == today_str:
         logger.info(f"Apex: startup message already sent today ({today_str}) — skipping.")
+    elif not in_briefing_window:
+        logger.info(f"Apex: startup message suppressed (hour={current_hour} UTC, not in briefing window).")
     else:
         try:
             await _send_startup_message(discord)
