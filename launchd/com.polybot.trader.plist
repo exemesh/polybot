@@ -8,7 +8,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>cd ~/polybot && git pull origin main --quiet && source .venv/bin/activate && python main.py</string>
+        <string>cd ~/polybot && git checkout -- . 2>/dev/null; git pull origin main --quiet 2>/dev/null; /opt/homebrew/bin/python3.11 main.py</string>
     </array>
     <key>StartInterval</key>
     <integer>300</integer>
