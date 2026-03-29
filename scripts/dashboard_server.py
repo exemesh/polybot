@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 HOME = Path.home()
 BOT_CTRL     = HOME / "polybot/data/bot_control.json"
 POLY_LOG     = HOME / "polybot/logs/polybot.log"
-PORTFOLIO    = HOME / "polybot/data/portfolio.json"
+POLY_DB      = HOME / "polybot/data/polybot.db"
 BIN_STATUS   = HOME / "bots/binancebot/data/status.json"
 BIN_LOG      = HOME / "bots/binancebot/logs/binancebot.log"
 
@@ -33,6 +33,81 @@ def read_json(path: Path) -> dict:
         return json.loads(path.read_text()) if path.exists() else {}
     except Exception:
         return {}
+
+
+def read_portfolio_from_db() -> dict:
+    """Read portfolio stats directly from polybot.db SQLite."""
+    result = {
+        "portfolio_value": 0, "cash": 0, "deployed": 0,
+        "total_pnl": 0, "win_rate": 0, "wins": 0, "losses": 0,
+        "positions": [],
+    }
+    if not POLY_DB.exists():
+        return result
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(POLY_DB))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # Realized P&L from closed trades (live only)
+        row = cur.execute(
+            "SELECT COALESCE(SUM(pnl),0) as total, "
+            "SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins, "
+            "SUM(CASE WHEN pnl<=0 THEN 1 ELSE 0 END) as losses "
+            "FROM trades WHERE dry_run=0 AND pnl IS NOT NULL "
+            "AND status IN ('won','lost','resolved')"
+        ).fetchone()
+        total_pnl = float(row["total"] or 0)
+        wins      = int(row["wins"] or 0)
+        losses    = int(row["losses"] or 0)
+        closed    = wins + losses
+        win_rate  = (wins / closed * 100) if closed > 0 else 0
+
+        # Open positions
+        open_rows = cur.execute(
+            "SELECT market_question, side, token_id, price, size_usd "
+            "FROM trades WHERE dry_run=0 AND status='open'"
+        ).fetchall()
+        deployed = sum(float(r["size_usd"] or 0) for r in open_rows)
+        positions = [
+            {
+                "question": r["market_question"] or "",
+                "side": r["side"] or "",
+                "size": float(r["size_usd"] or 0),
+                "price": float(r["price"] or 0),
+                "current_price": float(r["price"] or 0),  # live price not stored
+            }
+            for r in open_rows
+        ]
+
+        # Try to read initial capital from settings env
+        try:
+            import sys
+            sys.path.insert(0, str(HOME / "polybot"))
+            from dotenv import load_dotenv as _lde
+            _lde(HOME / "polybot/.env")
+            initial = float(os.getenv("INITIAL_CAPITAL", "200"))
+        except Exception:
+            initial = 200.0
+
+        portfolio_value = initial + total_pnl
+        cash = max(portfolio_value - deployed, 0)
+
+        result.update({
+            "portfolio_value": round(portfolio_value, 2),
+            "cash": round(cash, 2),
+            "deployed": round(deployed, 2),
+            "total_pnl": round(total_pnl, 4),
+            "win_rate": round(win_rate, 1),
+            "wins": wins,
+            "losses": losses,
+            "positions": positions,
+        })
+        conn.close()
+    except Exception as e:
+        result["error"] = str(e)
+    return result
 
 
 def tail_log(path: Path, n: int = 25) -> list[str]:
@@ -87,7 +162,7 @@ def minutes_since(ts_str: str) -> float | None:
 
 def build_html() -> str:
     ctrl      = read_json(BOT_CTRL)
-    portfolio = read_json(PORTFOLIO)
+    portfolio = read_portfolio_from_db()
     bin_st    = read_json(BIN_STATUS)
     poly_logs = tail_log(POLY_LOG, 25)
     bin_logs  = tail_log(BIN_LOG, 10)
