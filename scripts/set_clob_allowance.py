@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-One-shot script: approve USDC allowance for the Polymarket CLOB exchange contract.
-Run this once whenever CLOB shows balance: 0 despite having USDC in wallet.
+One-shot script: approve USDC + conditional token allowances for Polymarket CLOB.
+Run this once whenever CLOB shows balance: 0 despite having USDC in wallet,
+or when SELL orders fail with 'not enough balance / allowance'.
 
 Usage: python3.11 ~/polybot/scripts/set_clob_allowance.py
 """
@@ -10,7 +11,6 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from polybot directory
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)
 
@@ -21,7 +21,7 @@ if not PRIVATE_KEY:
 
 try:
     from py_clob_client.client import ClobClient
-    from py_clob_client.clob_types import AssetType
+    from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
     from py_clob_client.constants import POLYGON
 except ImportError:
     print("ERROR: py-clob-client not installed. Run: pip3.11 install py-clob-client")
@@ -33,26 +33,53 @@ CHAIN_ID = POLYGON
 print("Connecting to Polymarket CLOB...")
 client = ClobClient(HOST, key=PRIVATE_KEY, chain_id=CHAIN_ID)
 
-print("Checking current USDC balance/allowance...")
-try:
-    bal = client.get_balance_allowance(asset_type=AssetType.USDC)
-    print(f"USDC state: {bal}")
-except Exception as e:
-    print(f"Balance check error: {e}")
+creds = client.create_or_derive_api_creds()
+client.set_api_creds(creds)
 
-print("\nApproving USDC allowance for CLOB exchange contract...")
-try:
-    result = client.update_balance_allowance(asset_type=AssetType.USDC)
-    print(f"Result: {result}")
-    print("\n✅ Done — CLOB should now see your USDC balance.")
-except Exception as e:
-    print(f"update_balance_allowance failed: {e}")
-    # Try the conditional token approval too
+print("\nChecking current balances...")
+for asset in [AssetType.COLLATERAL, AssetType.CONDITIONAL]:
     try:
-        result2 = client.update_balance_allowance(asset_type=AssetType.CONDITIONAL)
-        print(f"Conditional result: {result2}")
-        print("\n✅ Done.")
-    except Exception as e2:
-        print(f"All approval methods failed: {e2}")
-        print("\nManual fix: go to polymarket.com → click your balance → Deposit → deposit $1")
-        sys.exit(1)
+        bal = client.get_balance_allowance(params=BalanceAllowanceParams(asset_type=asset))
+        print(f"  {asset}: {bal}")
+    except Exception as e:
+        print(f"  {asset} check error: {e}")
+
+print("\nSyncing USDC (COLLATERAL) allowance...")
+try:
+    r = client.update_balance_allowance(params=BalanceAllowanceParams(asset_type=AssetType.COLLATERAL))
+    print(f"  COLLATERAL sync: {r}")
+except Exception as e:
+    print(f"  COLLATERAL sync failed: {e}")
+
+print("\nSyncing outcome token (CONDITIONAL) allowances for open positions...")
+try:
+    import sqlite3
+    db_path = Path(__file__).parent.parent / "data" / "polybot.db"
+    conn = sqlite3.connect(str(db_path))
+    tokens = conn.execute(
+        "SELECT DISTINCT token_id FROM trades WHERE status='open' AND dry_run=0 AND token_id IS NOT NULL"
+    ).fetchall()
+    conn.close()
+    if tokens:
+        for (tid,) in tokens:
+            try:
+                r = client.update_balance_allowance(
+                    params=BalanceAllowanceParams(asset_type=AssetType.CONDITIONAL, token_id=tid)
+                )
+                print(f"  {tid[:16]}... sync: {r or 'OK'}")
+            except Exception as e:
+                print(f"  {tid[:16]}... failed: {e}")
+    else:
+        print("  No open live positions found in DB")
+except Exception as e:
+    print(f"  CONDITIONAL sync failed: {e}")
+
+print("\nRe-checking balances after sync...")
+for asset in [AssetType.COLLATERAL, AssetType.CONDITIONAL]:
+    try:
+        bal = client.get_balance_allowance(params=BalanceAllowanceParams(asset_type=asset))
+        print(f"  {asset}: {bal}")
+    except Exception as e:
+        print(f"  {asset}: {e}")
+
+print("\n✅ Done. If CLOB still shows $0, go to polymarket.com → click balance → Deposit.")

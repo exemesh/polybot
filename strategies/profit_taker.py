@@ -546,6 +546,24 @@ class ProfitTakerStrategy:
         if side in ("BUY_YES", "BUY_NO", "BUY") and token_id and "|" not in token_id:
             tokens_owned = size_usd / entry_price if entry_price > 0 else 0
             if tokens_owned > 0:
+                # Sync conditional (outcome token) allowance for this specific token
+                # before selling — required so CLOB can access the tokens.
+                if not self.settings.DRY_RUN:
+                    try:
+                        from core.key_vault import get_client as _kv_client, is_ready as _kv_ready
+                        from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+                        if _kv_ready():
+                            _clob = _kv_client()
+                            if _clob:
+                                _clob.update_balance_allowance(
+                                    params=BalanceAllowanceParams(
+                                        asset_type=AssetType.CONDITIONAL,
+                                        token_id=token_id
+                                    )
+                                )
+                    except Exception as _allow_err:
+                        logger.debug(f"Pre-SELL allowance sync skipped: {_allow_err}")
+
                 sell_result = await self.poly_client.place_market_order(
                     token_id, tokens_owned, "SELL", self.settings.DRY_RUN
                 )
@@ -584,6 +602,22 @@ class ProfitTakerStrategy:
         if side in ("BUY_YES", "BUY_NO", "BUY") and token_id and "|" not in token_id:
             tokens_to_sell = sell_size / entry_price if entry_price > 0 else 0
             if tokens_to_sell > 0:
+                if not self.settings.DRY_RUN:
+                    try:
+                        from core.key_vault import get_client as _kv_client, is_ready as _kv_ready
+                        from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+                        if _kv_ready():
+                            _clob = _kv_client()
+                            if _clob:
+                                _clob.update_balance_allowance(
+                                    params=BalanceAllowanceParams(
+                                        asset_type=AssetType.CONDITIONAL,
+                                        token_id=token_id
+                                    )
+                                )
+                    except Exception as _allow_err:
+                        logger.debug(f"Pre-SELL allowance sync skipped: {_allow_err}")
+
                 sell_result = await self.poly_client.place_market_order(
                     token_id, tokens_to_sell, "SELL", self.settings.DRY_RUN
                 )
