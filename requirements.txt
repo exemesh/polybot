@@ -28,3 +28,6 @@ typing-extensions>=4.0.0
 
 # Async HTTP (already covered by httpx, but explicit for agent swarm)
 aiohttp>=3.9.0
+
+# OpenAI — required for SwarmForecaster (MiroFish-style multi-agent consensus)
+openai>=1.30.0

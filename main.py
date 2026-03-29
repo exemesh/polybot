@@ -37,6 +37,7 @@ from strategies.sports_intel import SportsIntelStrategy
 from strategies.news_arb import NewsArbitrageStrategy
 from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
+from strategies.swarm_forecaster import SwarmForecasterStrategy
 from core.win_rate_monitor import check as check_win_rate, format_discord_alert, load_recalibration
 from core.key_vault import init_vault, redacted_repr as vault_repr
 from core.reasoning_logger import init_reasoning_logger, log_cycle_summary
@@ -316,6 +317,8 @@ class PolyBot:
             self.strategies.append(NewsArbitrageStrategy(self.settings, self.portfolio, self.risk_manager))
         if self.settings.ENABLE_AI_FORECASTER:
             self.strategies.append(AIForecasterStrategy(self.settings, self.portfolio, self.risk_manager))
+        if self.settings.ENABLE_SWARM_FORECASTER:
+            self.strategies.append(SwarmForecasterStrategy(self.settings, self.portfolio, self.risk_manager))
 
         logger.info(f"PolyBot initialized with {len(self.strategies)} strategies")
         mode_str = "LIVE TRADING" if not self.settings.DRY_RUN else "DRY RUN"

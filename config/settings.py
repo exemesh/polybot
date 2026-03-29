@@ -71,8 +71,9 @@ class Settings:
 
     # ─── Strategy Toggles ───────────────────────────────────────────
     # ENABLED: Only research-backed strategies with real edge
-    ENABLE_GENERAL_SCANNER: bool = True   # Arb-only mode (3%+ edge, $50k+ liquidity)
-    ENABLE_NEWS_ARB: bool = True          # Primary edge: breaking news vs market lag
+    ENABLE_GENERAL_SCANNER: bool = True      # Arb-only mode (3%+ edge, $50k+ liquidity)
+    ENABLE_NEWS_ARB: bool = True             # Breaking news vs market lag
+    ENABLE_SWARM_FORECASTER: bool = True     # MiroFish-style 7-agent swarm consensus
     # DISABLED: No real edge, spread-hunting only, or broken data sources
     ENABLE_WEATHER_ARB: bool = False      # Disabled — public data, no edge
     ENABLE_MARKET_MAKER: bool = False     # Disabled — requires continuous quoting
