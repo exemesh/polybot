@@ -564,12 +564,15 @@ class ProfitTakerStrategy:
                     except Exception as _allow_err:
                         logger.debug(f"Pre-SELL allowance sync skipped: {_allow_err}")
 
+                # Pass size_usd (USD amount) not tokens_owned — place_market_order
+                # expects USD for both BUY and SELL. Passing token count caused
+                # "order amount: $247" errors when entry_price was low (e.g. 6¢).
                 sell_result = await self.poly_client.place_market_order(
-                    token_id, tokens_owned, "SELL", self.settings.DRY_RUN
+                    token_id, size_usd, "SELL", self.settings.DRY_RUN
                 )
                 if sell_result.success:
                     logger.info(
-                        f"SELL order placed: {tokens_owned:.4f} tokens of {token_id[:16]}..."
+                        f"SELL order placed: ${size_usd:.2f} of {token_id[:16]}..."
                     )
                 else:
                     logger.warning(f"SELL failed for {token_id[:16]}: {sell_result.error}")
@@ -618,12 +621,14 @@ class ProfitTakerStrategy:
                     except Exception as _allow_err:
                         logger.debug(f"Pre-SELL allowance sync skipped: {_allow_err}")
 
+                # Pass sell_size (USD amount) not tokens_to_sell — consistent with
+                # place_market_order expecting USD for both BUY and SELL.
                 sell_result = await self.poly_client.place_market_order(
-                    token_id, tokens_to_sell, "SELL", self.settings.DRY_RUN
+                    token_id, sell_size, "SELL", self.settings.DRY_RUN
                 )
                 if sell_result.success:
                     logger.info(
-                        f"PARTIAL SELL: {tokens_to_sell:.4f} tokens of {token_id[:16]}... "
+                        f"PARTIAL SELL: ${sell_size:.2f} of {token_id[:16]}... "
                         f"({fraction:.0%} of position)"
                     )
                 else:
