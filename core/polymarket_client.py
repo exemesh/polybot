@@ -133,7 +133,7 @@ class PolymarketClient:
             if self.settings.PRIVATE_KEY:
                 try:
                     funder = getattr(self.settings, "FUNDER_ADDRESS", "")
-                    kwargs = dict(chain_id=self.settings.CHAIN_ID, signature_type=2)  # POLY_PROXY
+                    kwargs = dict(chain_id=self.settings.CHAIN_ID, signature_type=1)  # POLY_GNOSIS_SAFE — Magic Link / Google
                     if funder:
                         kwargs["funder"] = funder
                     self._client = ClobClient(

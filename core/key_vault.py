@@ -56,7 +56,7 @@ def get_client():
         return None
     try:
         from py_clob_client.client import ClobClient
-        kwargs = dict(chain_id=_CHAIN_ID, signature_type=2)  # POLY_PROXY — standard polymarket.com MetaMask account
+        kwargs = dict(chain_id=_CHAIN_ID, signature_type=1)  # POLY_GNOSIS_SAFE — Magic Link / Google sign-in account
         if _FUNDER_ADDRESS:
             kwargs["funder"] = _FUNDER_ADDRESS
         client = ClobClient(_CLOB_HOST, key=_PRIVATE_KEY, **kwargs)
