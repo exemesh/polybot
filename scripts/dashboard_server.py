@@ -21,11 +21,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 HOME = Path.home()
-BOT_CTRL     = HOME / "polybot/data/bot_control.json"
-POLY_LOG     = HOME / "polybot/logs/polybot.log"
-POLY_DB      = HOME / "polybot/data/polybot.db"
-BIN_STATUS   = HOME / "bots/binancebot/data/status.json"
-BIN_LOG      = HOME / "bots/binancebot/logs/binancebot.log"
+# Resolve actual polybot location — check nanoclaw workspace first, fallback to legacy path
+_NANO_BASE = HOME / "nanoclaw/groups/discord_main"
+POLY_BASE    = _NANO_BASE / "polybot" if (_NANO_BASE / "polybot").exists() else HOME / "polybot"
+BOT_CTRL     = POLY_BASE / "data/bot_control.json"
+POLY_LOG     = POLY_BASE / "logs/polybot.log"
+POLY_DB      = POLY_BASE / "data/polybot.db"
+BIN_BASE     = _NANO_BASE / "binancebot" if (_NANO_BASE / "binancebot").exists() else HOME / "bots/binancebot"
+BIN_STATUS   = BIN_BASE / "data/status.json"
+BIN_LOG      = BIN_BASE / "logs/binancebot.log"
 
 
 def read_json(path: Path) -> dict:
@@ -33,6 +37,21 @@ def read_json(path: Path) -> dict:
         return json.loads(path.read_text()) if path.exists() else {}
     except Exception:
         return {}
+
+
+def fetch_clob_price(token_id: str) -> float:
+    """Fetch live mid price from Polymarket CLOB API. Returns 0.0 on failure."""
+    if not token_id or "|" in token_id:
+        return 0.0
+    try:
+        import urllib.request
+        url = f"https://clob.polymarket.com/price?token_id={token_id}&side=BUY"
+        req = urllib.request.Request(url, headers={"User-Agent": "exemesh/1.0"})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            data = json.loads(r.read())
+            return float(data.get("price", 0))
+    except Exception:
+        return 0.0
 
 
 def read_portfolio_from_db() -> dict:
@@ -70,28 +89,40 @@ def read_portfolio_from_db() -> dict:
             "FROM trades WHERE dry_run=0 AND status='open'"
         ).fetchall()
         deployed = sum(float(r["size_usd"] or 0) for r in open_rows)
-        positions = [
-            {
+
+        # Fetch live prices for uP&L (timeout 2s each, skip on failure)
+        positions = []
+        for r in open_rows:
+            entry = float(r["price"] or 0)
+            live  = fetch_clob_price(r["token_id"] or "")
+            curr  = live if live > 0 else entry
+            positions.append({
                 "question": r["market_question"] or "",
                 "side": r["side"] or "",
                 "size": float(r["size_usd"] or 0),
-                "price": float(r["price"] or 0),
-                "current_price": float(r["price"] or 0),  # live price not stored
-            }
-            for r in open_rows
-        ]
+                "price": entry,
+                "current_price": curr,
+            })
 
-        # Try to read initial capital from settings env
+        # Try to read initial capital from polybot .env (correct path)
         try:
             import sys
-            sys.path.insert(0, str(HOME / "polybot"))
+            sys.path.insert(0, str(POLY_BASE))
             from dotenv import load_dotenv as _lde
-            _lde(HOME / "polybot/.env")
-            initial = float(os.getenv("INITIAL_CAPITAL", "200"))
+            _lde(POLY_BASE / ".env")
+            initial = float(os.getenv("INITIAL_CAPITAL", "0") or 0)
         except Exception:
-            initial = 200.0
+            initial = 0.0
 
-        portfolio_value = initial + total_pnl
+        # Best-effort portfolio value: CLOB balance from bot_control > env > fallback
+        ctrl_snap = read_json(BOT_CTRL)
+        clob_bal = float(ctrl_snap.get("usdc_balance") or ctrl_snap.get("clob_balance") or 0)
+        if clob_bal > 0:
+            portfolio_value = clob_bal + deployed
+        elif initial > 0:
+            portfolio_value = initial + total_pnl
+        else:
+            portfolio_value = deployed + max(total_pnl, 0)
         cash = max(portfolio_value - deployed, 0)
 
         result.update({
@@ -129,8 +160,8 @@ def launchd_services() -> list[tuple[str, str, bool]]:
         ("com.polybot.dep-watchdog", "dep-watchdog (Sunday)"),
         ("com.polybot.api-server",   "api-server (8766)"),
         ("com.polybot.dashboard",    "dashboard (8767)"),
-        ("com.polybot-interactions", "interactions (8765)"),
         ("com.binancebot",           "binancebot (8h)"),
+        ("homebrew.mxcl.cloudflared", "cloudflared (tunnel)"),
     ]
     try:
         out = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5).stdout
@@ -439,7 +470,7 @@ async function control(action) {{
   const msg = document.getElementById("ctrl-msg");
   msg.textContent = "Sending...";
   try {{
-    const r = await fetch("https://api.exemesh.dev/" + action, {{
+    const r = await fetch("http://localhost:8766/" + action, {{
       method:"POST", headers:{{"Authorization":"Bearer " + token}}
     }});
     const d = await r.json();
