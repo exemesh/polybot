@@ -108,10 +108,26 @@ def main():
         state["bin_fp"] = bin_fp
 
     # ── Process health ────────────────────────────────────────────────────
-    poly_running = check_process_running("python3.11 main.py")
-    if not poly_running and state.get("poly_was_running", True):
-        alerts.append(f"⚠️ **Polybot process NOT running** [{now}] — launchd may have failed")
-    state["poly_was_running"] = poly_running
+    # Polybot is a one-shot launchd job (runs every 5 min then exits).
+    # Don't check for live process — check last_bot_run timestamp instead.
+    # Alert only if the bot hasn't run in > 15 minutes (3 missed cycles).
+    bot_control = Path.home() / "polybot/data/bot_control.json"
+    try:
+        ctrl = json.loads(bot_control.read_text())
+        last_run_str = ctrl.get("last_bot_run") or ctrl.get("updated_at", "")
+        if last_run_str:
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            last_run = _dt.fromisoformat(last_run_str.replace("Z", "+00:00"))
+            if last_run.tzinfo is None:
+                last_run = last_run.replace(tzinfo=_tz.utc)
+            minutes_since = (_dt.now(_tz.utc) - last_run).total_seconds() / 60
+            if minutes_since > 15:
+                alerts.append(
+                    f"⚠️ **Polybot stalled** [{now}] — last run {minutes_since:.0f} min ago "
+                    f"(expected every 5 min). launchd may have failed."
+                )
+    except Exception:
+        pass  # bot_control not readable — skip health check
 
     # ── Error log check ───────────────────────────────────────────────────
     err_lines = tail_file(ERROR_LOG, n=10)
