@@ -121,11 +121,8 @@ class PolymarketClient:
                 if vault_ready():
                     client = vault_client()
                     if client is not None:
-                        try:
-                            creds = client.create_or_derive_api_creds()
-                            client.set_api_creds(creds)
-                        except Exception as e:
-                            logger.warning(f"KeyVault create_or_derive_api_creds failed: {e}")
+                        creds = client.create_or_derive_api_creds()
+                        client.set_api_creds(creds)
                         self._client = client
                         logger.info("CLOB client authenticated via KeyVault")
                         return self._client
@@ -136,7 +133,7 @@ class PolymarketClient:
             if self.settings.PRIVATE_KEY:
                 try:
                     funder = getattr(self.settings, "FUNDER_ADDRESS", "")
-                    kwargs = dict(chain_id=self.settings.CHAIN_ID, signature_type=1)
+                    kwargs = dict(chain_id=self.settings.CHAIN_ID, signature_type=2)  # POLY_PROXY
                     if funder:
                         kwargs["funder"] = funder
                     self._client = ClobClient(
