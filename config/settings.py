@@ -56,12 +56,12 @@ class Settings:
     TELEGRAM_REPORT_ENABLED: bool = True
 
     # ─── Capital & Risk ─────────────────────────────────────────────
-    # AGGRESSIVE MODE: $100 paper trading, push to limits
+    # DISCIPLINED MODE: max 5 positions, research-backed entries only
     INITIAL_CAPITAL: float = field(default_factory=lambda: float(os.getenv("INITIAL_CAPITAL", "100")))
-    MAX_POSITION_PCT: float = 0.75            # 75% per trade — allows full $5 trades on $7 portfolio
-    MAX_GLOBAL_EXPOSURE_PCT: float = 0.75     # 75% deployed — allows $5 trades on $7 portfolio
-    DAILY_LOSS_LIMIT_PCT: float = 0.40        # 40% daily loss limit — allows positions to breathe on $200 portfolio
-    MAX_SIMULTANEOUS_POSITIONS: int = 15      # Up to 15 positions — focused portfolio
+    MAX_POSITION_PCT: float = 0.10            # 10% per trade — ~$24 max on $240 portfolio
+    MAX_GLOBAL_EXPOSURE_PCT: float = 0.50     # 50% deployed max — always keep dry powder
+    DAILY_LOSS_LIMIT_PCT: float = 0.15        # 15% daily loss limit — stop at $36 loss on $240
+    MAX_SIMULTANEOUS_POSITIONS: int = 5       # Max 5 positions — quality over quantity
     KELLY_FRACTION: float = 0.25              # 25% Kelly — true quarter-Kelly
 
     # ─── AI Superforecaster (from Polymarket/agents) ─────────────────
@@ -70,14 +70,17 @@ class Settings:
     ENABLE_AI_FORECASTER: bool = True  # Auto-disables if no OPENAI_API_KEY
 
     # ─── Strategy Toggles ───────────────────────────────────────────
-    ENABLE_WEATHER_ARB: bool = True
-    ENABLE_MARKET_MAKER: bool = False  # Disabled - requires continuous quoting
-    ENABLE_CROSS_PLATFORM_ARB: bool = True
-    ENABLE_GENERAL_SCANNER: bool = True
-    ENABLE_MOMENTUM_SCALPER: bool = True
-    ENABLE_SPREAD_CAPTURE: bool = True
-    ENABLE_SPORTS_INTEL: bool = True
-    ENABLE_NEWS_ARB: bool = True
+    # ENABLED: Only research-backed strategies with real edge
+    ENABLE_GENERAL_SCANNER: bool = True   # Arb-only mode (3%+ edge, $50k+ liquidity)
+    ENABLE_NEWS_ARB: bool = True          # Primary edge: breaking news vs market lag
+    # DISABLED: No real edge, spread-hunting only, or broken data sources
+    ENABLE_WEATHER_ARB: bool = False      # Disabled — public data, no edge
+    ENABLE_MARKET_MAKER: bool = False     # Disabled — requires continuous quoting
+    ENABLE_CROSS_PLATFORM_ARB: bool = False  # Disabled — Kalshi data unreliable
+    ENABLE_MOMENTUM_SCALPER: bool = False # Disabled — favorites are favorites for a reason
+    ENABLE_SPREAD_CAPTURE: bool = False   # Disabled — 0.1% edge lost to slippage
+    ENABLE_SPORTS_INTEL: bool = False     # Disabled — odds API data unreliable
+    ENABLE_AI_FORECASTER: bool = False    # Disabled — LLM hallucinations, no real edge
     ODDS_API_KEY: str = field(default_factory=lambda: os.getenv("ODDS_API_KEY", ""))
     DRY_RUN: bool = field(default_factory=lambda: os.getenv("DRY_RUN", "true").lower() == "true")
 

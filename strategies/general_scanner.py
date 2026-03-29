@@ -1,14 +1,15 @@
 """
-General Market Scanner Strategy
-Scans all active Polymarket markets for mispriced opportunities.
-Trades markets closing within 30 days for aggressive capital turnover.
-Uses real edge calculation instead of naive fair-value assumptions.
+General Market Scanner Strategy — ARB ONLY MODE
+Scans Polymarket for genuine arbitrage opportunities (YES + NO < $1.00).
 
-Trade rules:
-- $2-5 USD per trade (arbs $5, value $2)
-- Minimum 15% return potential
-- 30-day max timeline, prefer markets closing sooner
-- Max 20 trades per cycle
+Strict rules (post-loss-audit):
+- ARB ONLY: no directional/value trades — we have no research edge on outcomes
+- Minimum 3% edge after fees (not 0.3% — slippage eats thin arbs)
+- Minimum $50,000 CLOB liquidity (no illiquid lottery-ticket markets)
+- Price filter 25¢-75¢ only (no <10¢ longshots on either side)
+- Max 3 arb trades per cycle
+- $10 USD per trade
+- Cooldown: 4 hours per market after trade
 """
 
 import asyncio
@@ -36,25 +37,17 @@ class GeneralScannerStrategy:
         self.traded_markets: Dict[str, float] = {}  # condition_id -> last_trade_time
 
     async def run_once(self, open_token_ids=None):
-        """Single scan-and-trade cycle."""
-        logger.info("GeneralScanner: scanning for SHORT-DURATION high-return markets")
+        """Single scan-and-trade cycle — arb only."""
+        logger.info("GeneralScanner: scanning for HIGH-QUALITY arb opportunities (3%+ edge, $50k+ liquidity)")
         try:
             opportunities = await self._scan_markets()
             executed = 0
-            # Arb trades first (guaranteed profit) — unlimited
-            # Value trades second — max 5
-            arb_opps = [o for o in opportunities if o["type"] == "arb"]
-            value_opps = [o for o in opportunities if o["type"] == "value"]
-
-            for opp in arb_opps[:15]:  # Up to 15 arb trades per cycle
+            # Arb trades only — max 3 per cycle to avoid overexposure
+            for opp in opportunities[:3]:
                 success = await self._execute_trade(opp)
                 if success:
                     executed += 1
-            for opp in value_opps[:5]:  # Max 5 value trades per cycle
-                success = await self._execute_trade(opp)
-                if success:
-                    executed += 1
-            logger.info(f"GeneralScanner complete: {len(arb_opps)} arbs + {len(value_opps)} value | {executed} trades executed")
+            logger.info(f"GeneralScanner complete: {len(opportunities)} arbs found | {executed} trades executed")
         except Exception as e:
             logger.error(f"GeneralScanner error: {e}", exc_info=True)
 
@@ -81,9 +74,9 @@ class GeneralScannerStrategy:
             if self.portfolio.has_open_position(condition_id):
                 continue
 
-            # Skip recently traded markets (1 hour in-memory cooldown)
+            # Skip recently traded markets (4 hour cooldown — arbs need time to resolve)
             if condition_id in self.traded_markets:
-                if time.time() - self.traded_markets[condition_id] < 3600:
+                if time.time() - self.traded_markets[condition_id] < 14400:
                     continue
 
             # Must have YES and NO tokens
@@ -165,28 +158,33 @@ class GeneralScannerStrategy:
                 total = yes_mid + no_mid
                 spread = yes_book.spread
 
-            # Minimum liquidity check
-            if min_liquidity < 10:
+            # ── STRICT liquidity gate: $50k minimum ──
+            # Illiquid markets have wide bid-ask, arb edges evaporate on execution
+            if min_liquidity < 50_000:
                 skipped_low_liq += 1
                 continue
 
-            # Time urgency bonus: markets closing sooner get priority
+            # ── STRICT price filter: both sides must be 25¢-75¢ ──
+            # Prevents buying lottery tickets (<10¢) and near-certain positions (>90¢)
+            if not (0.25 <= yes_mid <= 0.75 and 0.25 <= no_mid <= 0.75):
+                continue
+
+            # Time urgency bonus for ranking
             time_bonus = 0
             if hours_until and hours_until <= 24:
-                time_bonus = 0.10  # Strong bonus for same-day resolution
+                time_bonus = 0.10
             elif hours_until and hours_until <= 72:
-                time_bonus = 0.05  # Moderate bonus for 3-day resolution
+                time_bonus = 0.05
             elif hours_until and hours_until <= 168:
-                time_bonus = 0.02  # Small bonus for 1-week resolution
+                time_bonus = 0.02
 
-            # ── Opportunity Type 1: Arbitrage (YES + NO < $1.00) ──
-            # Guaranteed profit on resolution regardless of outcome
-            # AGGRESSIVE: wider threshold to catch more arbs
-            if total < 0.998:
+            # ── ARB ONLY: YES + NO < $1.00, minimum 3% edge ──
+            # 3% edge = absorbs CLOB fees (0.4%), slippage (1%), and still profitable
+            # Anything below 3% is noise — our losses prove it
+            if total < 0.970:  # YES + NO must sum to < 97¢
                 arb_edge = 1.0 - total - 0.004  # Subtract ~0.4% fees
-                if arb_edge > 0.003:  # > 0.3% edge — safe margin above fees/slippage
-                    # Calculate annualized return for ranking
-                    return_pct = arb_edge / total * 100  # % return
+                if arb_edge >= 0.030:  # Must have 3%+ real edge
+                    return_pct = arb_edge / total * 100
                     opportunities.append({
                         "type": "arb",
                         "condition_id": condition_id,
@@ -200,66 +198,10 @@ class GeneralScannerStrategy:
                         "liquidity": min_liquidity,
                         "side": "BOTH",
                         "hours_until": hours_until,
-                        "score": return_pct + time_bonus * 100,  # Prioritize quick closers
+                        "score": return_pct + time_bonus * 100,
                     })
-                    continue
-
-            # ── Opportunity Type 2: High-conviction value bets ──
-            # ONLY trade when:
-            # - Token price implies >= 30% potential return on resolution
-            # - Market closes within 7 days (prefer < 72h)
-            # - Spread is tight (market is active)
-            # For $1 trade at price P, if we win: payout = $1/P tokens * $1 = $1/P
-            # Return = ($1/P - $1) / $1 = (1/P) - 1
-            # For 30% return: need price <= 1/1.30 ≈ 0.77
-            # But we also need actual conviction — not just cheap tokens
-
-            # Buy YES or NO: value opportunity
-            # ONLY trade in the 20-80% uncertainty zone.
-            # Tokens below 20¢ are cheap because the market already knows they'll lose —
-            # buying them is not "value", it's buying longshots. Tokens above 80¢ have
-            # too little return potential to justify the risk.
-            # This prevents the scanner from buying 5-7¢ "lottery tickets" that look
-            # attractive purely because the potential % return is huge.
-            MIN_PRICE = 0.20
-            MAX_PRICE = 0.80
-
-            best_side = None
-            best_price = None
-            best_return = 0
-
-            if MIN_PRICE <= yes_mid <= MAX_PRICE and spread < 0.15 and hours_until is not None:
-                yes_return = (1.0 / yes_mid - 1.0) * 100
-                if yes_return >= 25 and min_liquidity > 50:
-                    best_side = "BUY_YES"
-                    best_price = yes_mid
-                    best_return = yes_return
-
-            if MIN_PRICE <= no_mid <= MAX_PRICE and spread < 0.15 and hours_until is not None:
-                no_return = (1.0 / no_mid - 1.0) * 100
-                if no_return >= 25 and min_liquidity > 50:
-                    # Pick the side with higher return potential
-                    if best_side is None or no_return > best_return:
-                        best_side = "BUY_NO"
-                        best_price = no_mid
-                        best_return = no_return
-
-            if best_side:
-                opportunities.append({
-                    "type": "value",
-                    "condition_id": condition_id,
-                    "question": market.get("question", ""),
-                    "yes_token_id": yes_id,
-                    "no_token_id": no_id,
-                    "yes_price": yes_mid,
-                    "no_price": no_mid,
-                    "edge": best_return / 100,
-                    "return_pct": best_return,
-                    "liquidity": min_liquidity,
-                    "side": best_side,
-                    "hours_until": hours_until,
-                    "score": best_return * (1 + time_bonus) * min(1.0, min_liquidity / 100),
-                })
+            # NOTE: No value/directional trades — we have no research edge on outcomes.
+            # All directional trades go through news_arb (backed by breaking news signal).
 
             # Rate limit: don't hammer the API
             if analyzed % 10 == 0:
@@ -285,9 +227,9 @@ class GeneralScannerStrategy:
 
     async def _execute_trade(self, opp: Dict) -> bool:
         """Execute a paper/live trade for an opportunity.
-        All trades: $15 USD
+        All trades: $10 USD. 4-hour cooldown per market.
         """
-        trade_size = 15.00
+        trade_size = 10.00
 
         approved, reason = self.risk_manager.approve_trade(trade_size, "general_scanner", opp["condition_id"])
         if not approved:

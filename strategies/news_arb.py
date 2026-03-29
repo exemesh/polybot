@@ -31,12 +31,21 @@ logger = logging.getLogger("polybot.news_arb")
 
 # ─── RSS Feeds ────────────────────────────────────────────────────────────────
 RSS_FEEDS = [
+    # Tier 1 — fastest breaking news, highest signal quality
+    {"name": "Reuters World",      "url": "https://feeds.reuters.com/reuters/worldNews",                      "region": "GLOBAL"},
+    {"name": "Reuters Politics",   "url": "https://feeds.reuters.com/Reuters/PoliticsNews",                   "region": "GLOBAL"},
+    {"name": "Reuters Business",   "url": "https://feeds.reuters.com/reuters/businessNews",                   "region": "GLOBAL"},
+    {"name": "BBC World",          "url": "http://feeds.bbci.co.uk/news/world/rss.xml",                       "region": "UK"},
+    {"name": "BBC Politics",       "url": "http://feeds.bbci.co.uk/news/politics/rss.xml",                    "region": "UK"},
+    # Tier 2 — regional timezone edge (Asian/EU news hits before US traders react)
     {"name": "NHK World Politics", "url": "https://www3.nhk.or.jp/rss/news/cat6.xml",                        "region": "JP"},
     {"name": "NHK World Top",      "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",                        "region": "JP"},
     {"name": "EU Parliament",      "url": "https://www.europarl.europa.eu/rss/doc/rss-newsroom-en.xml",       "region": "EU"},
-    {"name": "BBC World",          "url": "http://feeds.bbci.co.uk/news/world/rss.xml",                       "region": "UK"},
-    {"name": "Reuters World",      "url": "https://feeds.reuters.com/reuters/worldNews",                      "region": "GLOBAL"},
     {"name": "Al Jazeera",         "url": "https://www.aljazeera.com/xml/rss/all.xml",                        "region": "GLOBAL"},
+    # Tier 3 — crypto/finance specific
+    {"name": "CoinDesk",           "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",                  "region": "CRYPTO"},
+    {"name": "AP Top News",        "url": "https://feeds.apnews.com/rss/apf-topnews",                         "region": "GLOBAL"},
+    {"name": "AP Politics",        "url": "https://feeds.apnews.com/rss/apf-politics",                        "region": "US"},
 ]
 
 YES_SIGNALS = [
@@ -54,10 +63,12 @@ NO_SIGNALS = [
     "continuing", "ongoing", "escalated", "worsened",
 ]
 
-MIN_NEWS_EDGE = 0.15
+MIN_NEWS_EDGE = 0.20        # 20% edge minimum — conviction required, not just keyword match
+MIN_MATCH_SCORE = 0.40     # 40% confidence minimum — raised from 0.25 to reduce false positives
+MIN_VOLUME_USD = 50_000    # $50k+ CLOB liquidity — only liquid markets have reliable prices
 MAX_NEWS_AGE_HOURS = 2
-TRADE_SIZE_USD = 15.0
-MAX_TRADES_PER_CYCLE = 3
+TRADE_SIZE_USD = 10.0      # $10 per trade — down from $15
+MAX_TRADES_PER_CYCLE = 2   # Max 2 news trades per cycle — quality over quantity
 MARKET_MAX_HOURS = 168
 
 
@@ -225,13 +236,22 @@ class NewsArbitrageStrategy:
             if yes_price <= 0.01 or yes_price >= 0.99:
                 continue
 
+            # Liquidity gate — only trade markets with real depth
+            liq = float(market.get("liquidityClob") or market.get("liquidityNum") or 0)
+            if liq < MIN_VOLUME_USD:
+                continue
+
+            # Price filter — no lottery tickets or near-certain outcomes
+            if not (0.15 <= yes_price <= 0.85):
+                continue
+
             keywords = self._extract_keywords(market.get("question", ""))
             match = self._best_match(keywords, news)
             if not match:
                 continue
 
             item, score, direction = match
-            if score < 0.25:
+            if score < MIN_MATCH_SCORE:  # 40% confidence required
                 continue
 
             if direction == "YES":
@@ -262,6 +282,7 @@ class NewsArbitrageStrategy:
                 "news_source":   item["source"],
                 "hours_until":   market.get("_hours_until", 999),
                 "neg_risk":      market.get("negRisk", False),
+                "liquidity":     liq,
                 "score":         score * edge * 100 / max(1.0, market.get("_hours_until", 48)),
             })
 
@@ -308,7 +329,7 @@ class NewsArbitrageStrategy:
                 conf = no_n / (yes_n + no_n)
 
             score = base * conf
-            if score > best_score and score > 0.25:
+            if score > best_score and score >= MIN_MATCH_SCORE:
                 best_score, best_item, best_dir = score, item, direction
 
         return (best_item, best_score, best_dir) if best_item else None
@@ -327,9 +348,10 @@ class NewsArbitrageStrategy:
             return False
 
         logger.info(
-            f"[NEWS ARB] {opp['question'][:55]} | {opp['side']} @ {opp['current_price']:.3f} "
-            f"| Edge: {opp['edge']:.1%} | Score: {opp['match_score']:.2f} "
-            f"| {opp['news_source']}: \"{opp['news_title'][:50]}\""
+            f"[NEWS ARB] ENTER | {opp['question'][:55]} | {opp['side']} @ {opp['current_price']:.3f} "
+            f"| Edge: {opp['edge']:.1%} | Confidence: {opp['match_score']:.0%} "
+            f"| Liquidity: ${opp.get('liquidity', 0):,.0f} "
+            f"| Source: {opp['news_source']} — \"{opp['news_title'][:60]}\""
         )
 
         result = await self.poly_client.place_market_order(
