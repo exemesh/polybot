@@ -115,14 +115,22 @@ def _mark_slot_posted(last_posts: dict, hour: int) -> None:
 # ── Polymarket fetch ────────────────────────────────────────────────────────
 
 async def fetch_polymarket_opportunities() -> list[dict]:
-    """Scan Polymarket Gamma API for high-edge open markets."""
+    """Scan Polymarket Gamma API for mispriced / high-value open markets.
+
+    Edge metric: measures how far the mid-price is from 50¢ relative to the
+    spread. A market at 20¢ bid / 22¢ ask has a real mid of 21¢ — if the
+    true probability is 25¢, that's a 4¢ edge. We proxy this by combining:
+      1. Price momentum: |lastTradePrice - bestMid| as signal of recent move
+      2. Spread efficiency: wide spread on a liquid market = inefficiency
+      3. Volume signal: 24h volume confirms genuine interest
+    """
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{POLYMARKET_GAMMA_URL}/markets",
                 params={
                     "closed": "false",
-                    "limit": 50,
+                    "limit": 100,
                     "order": "volume24hr",
                     "ascending": "false",
                 },
@@ -131,23 +139,49 @@ async def fetch_polymarket_opportunities() -> list[dict]:
                 markets = resp.json()
                 opportunities = []
                 for m in markets:
-                    best_ask = float(m.get("bestAsk", 0.5) or 0.5)
-                    best_bid = float(m.get("bestBid", 0.5) or 0.5)
-                    spread = round(best_ask - best_bid, 4)
-                    vol = float(m.get("volume24hr", 0) or 0)
-                    # Edge approximation: half spread as a percentage
-                    edge_pct = round((spread / 2) * 100, 2)
-                    if vol > 100:  # Only liquid markets
-                        opportunities.append({
-                            "question": m.get("question", "")[:120],
-                            "best_bid": best_bid,
-                            "best_ask": best_ask,
-                            "spread": spread,
-                            "edge_pct": edge_pct,
-                            "volume_24h": vol,
-                        })
-                # Sort by volume descending, return top 10 for buffering
-                opportunities.sort(key=lambda x: x["volume_24h"], reverse=True)
+                    best_ask = float(m.get("bestAsk") or 0)
+                    best_bid = float(m.get("bestBid") or 0)
+                    last_price = float(m.get("lastTradePrice") or m.get("price") or 0)
+                    vol_24h = float(m.get("volume24hr") or 0)
+                    vol_total = float(m.get("volume") or 0)
+
+                    if best_ask <= 0 or best_bid <= 0 or vol_24h < 500:
+                        continue  # skip illiquid / broken markets
+
+                    mid = (best_ask + best_bid) / 2
+                    spread = best_ask - best_bid
+
+                    # Edge signal 1: spread relative to mid (wider = more inefficient)
+                    spread_inefficiency = (spread / mid * 100) if mid > 0 else 0
+
+                    # Edge signal 2: recent price momentum vs current mid
+                    # If last trade moved away from mid significantly → momentum opportunity
+                    momentum_gap = abs(last_price - mid) * 100 if last_price > 0 else 0
+
+                    # Edge signal 3: market in sweet spot (20¢-80¢) = real uncertainty
+                    in_uncertainty_zone = 0.20 <= mid <= 0.80
+
+                    # Combined edge score — weighted
+                    edge_score = round(
+                        (spread_inefficiency * 0.5) + (momentum_gap * 0.3) + (5.0 if in_uncertainty_zone else 0),
+                        2
+                    )
+
+                    opportunities.append({
+                        "question": m.get("question", "")[:120],
+                        "best_bid": round(best_bid, 4),
+                        "best_ask": round(best_ask, 4),
+                        "mid_price": round(mid, 4),
+                        "spread": round(spread, 4),
+                        "last_price": round(last_price, 4),
+                        "edge_pct": edge_score,
+                        "volume_24h": vol_24h,
+                        "volume_total": vol_total,
+                        "in_uncertainty_zone": in_uncertainty_zone,
+                    })
+
+                # Sort by edge score descending, return top 10
+                opportunities.sort(key=lambda x: x["edge_pct"], reverse=True)
                 return opportunities[:10]
     except Exception as exc:
         logger.warning(f"Polymarket Gamma fetch failed: {exc}")
@@ -160,9 +194,11 @@ def _build_opp_line(opp: dict) -> str:
     q = opp.get("question", "")[:80]
     bid = opp.get("best_bid", 0)
     ask = opp.get("best_ask", 0)
+    mid = opp.get("mid_price", (bid + ask) / 2 if bid and ask else 0)
     vol = opp.get("volume_24h", 0)
     edge = opp.get("edge_pct", 0)
-    return f"• {q}\n  Bid: {bid:.3f} | Ask: {ask:.3f} | Edge: {edge:.2f}% | 24h Vol: ${vol:,.0f}"
+    zone = "🎯" if opp.get("in_uncertainty_zone") else "⚡"
+    return f"{zone} {q}\n  Mid: {mid:.3f} (Bid {bid:.3f} / Ask {ask:.3f}) | Score: {edge:.1f} | 24h: ${vol:,.0f}"
 
 
 async def _post_urgent(discord: DiscordAlerts, opp: dict) -> None:

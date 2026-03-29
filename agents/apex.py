@@ -67,7 +67,7 @@ async def _run_agent(name: str, coro) -> None:
 
 async def _send_startup_message(discord: DiscordAlerts) -> None:
     """Send a single startup message to the apex-command channel."""
-    content = "🔱 Apex online. Swarm active — Recon, Blaze, Sage and Sentinel running."
+    content = "🔱 Apex online. Swarm active — Recon, Sage and Sentinel running."
     await discord._post_channel_message(APEX_COMMAND_CHANNEL, content)
     logger.info("Apex: startup message sent to #apex-command.")
 

@@ -10,9 +10,13 @@ import os
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
+import httpx
+
 from utils.discord_alerts import DiscordAlerts
 
 logger = logging.getLogger("polybot.analyst")
+
+POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
 
 ANALYST_CHANNEL = "1483029691689341110"
 
@@ -173,18 +177,83 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
             except Exception:
                 pass
 
-        # Unrealized P&L from open positions (expected pnl field, if set)
-        unrealized_total = 0.0
+        # Unrealized P&L from open positions — fetch live prices from Gamma API
         open_count = len(open_rows)
+        unrealized_total = 0.0
+        open_position_details = []
         for row in open_rows:
             d = dict(row)
-            expected = d.get("pnl")
-            if expected is not None:
-                unrealized_total += float(expected)
+            token_id = d.get("token_id", "")
+            entry_price = float(d.get("price") or 0.0)
+            size_usd = float(d.get("size_usd") or 0.0)
+            side = (d.get("side") or "BUY").upper()
+            question = d.get("market_question", "")[:60]
+            shares = (size_usd / entry_price) if entry_price > 0 else 0.0
+            open_position_details.append({
+                "token_id": token_id,
+                "entry_price": entry_price,
+                "size_usd": size_usd,
+                "shares": shares,
+                "side": side,
+                "question": question,
+                "current_price": entry_price,  # fallback to entry price
+            })
+
+        # Fetch current prices from Gamma API for each open token
+        if open_position_details:
+            try:
+                token_ids = [p["token_id"] for p in open_position_details if p["token_id"]]
+                if token_ids:
+                    import asyncio as _asyncio
+
+                    async def _fetch_prices(ids):
+                        results = {}
+                        async with httpx.AsyncClient(timeout=10) as client:
+                            for tid in ids:
+                                try:
+                                    r = await client.get(
+                                        f"{POLYMARKET_GAMMA_URL}/markets",
+                                        params={"clob_token_ids": tid, "limit": 1},
+                                    )
+                                    if r.status_code == 200:
+                                        data = r.json()
+                                        if data:
+                                            m = data[0] if isinstance(data, list) else data
+                                            price = float(m.get("bestBid") or m.get("lastTradePrice") or 0)
+                                            if price > 0:
+                                                results[tid] = price
+                                except Exception:
+                                    pass
+                        return results
+
+                    try:
+                        loop = _asyncio.get_event_loop()
+                        if loop.is_running():
+                            price_map = {}
+                        else:
+                            price_map = loop.run_until_complete(_fetch_prices(token_ids))
+                    except Exception:
+                        price_map = {}
+
+                    for pos in open_position_details:
+                        tid = pos["token_id"]
+                        if tid in price_map:
+                            pos["current_price"] = price_map[tid]
+            except Exception as e:
+                logger.warning(f"Sage: live price fetch failed: {e}")
+
+        for pos in open_position_details:
+            entry = pos["entry_price"]
+            current = pos["current_price"]
+            shares = pos["shares"]
+            if entry > 0 and shares > 0:
+                unrealized_pnl = (current - entry) * shares
+                unrealized_total += unrealized_pnl
 
         stats["total_trades"] = len(realized_profits)
         stats["closed_trades"] = len(realized_profits)
         stats["open_positions"] = open_count
+        stats["open_position_details"] = open_position_details
         stats["wins"] = sum(1 for p in realized_profits if p > 0)
         stats["losses"] = sum(1 for p in realized_profits if p <= 0)
         stats["win_rate"] = (stats["wins"] / stats["total_trades"] * 100) if realized_profits else 0.0
@@ -192,7 +261,7 @@ def fetch_trade_stats_from_db(db_path: str) -> dict:
         stats["best_trade"] = max(realized_profits) if realized_profits else 0.0
         stats["worst_trade"] = min(realized_profits) if realized_profits else 0.0
         stats["total_pnl"] = sum(realized_profits)    # Realized P&L only
-        stats["unrealized_pnl"] = unrealized_total    # Open positions expected P&L
+        stats["unrealized_pnl"] = round(unrealized_total, 4)  # Live unrealized P&L
 
         for strat, pnls in strategy_map.items():
             stats["strategy_stats"][strat] = {
@@ -256,6 +325,22 @@ async def run_analyst() -> None:
     unrealized_pnl = db_stats.get("unrealized_pnl", 0.0)
     slot_label = "8AM" if current_hour == 8 else "5PM"
 
+    open_details = db_stats.get("open_position_details", [])
+    if open_details:
+        pos_lines = []
+        for p in open_details[:6]:
+            entry = p.get("entry_price", 0)
+            current = p.get("current_price", entry)
+            upnl = (current - entry) * p.get("shares", 0)
+            arrow = "📈" if upnl >= 0 else "📉"
+            pos_lines.append(
+                f"{arrow} {p.get('question','?')[:50]}\n"
+                f"  Entry: {entry:.3f} → Now: {current:.3f} | uP&L: ${upnl:+.2f}"
+            )
+        open_positions_text = "\n".join(pos_lines) or "No open positions"
+    else:
+        open_positions_text = f"{db_stats.get('open_positions', 0)} open positions (prices unavailable)"
+
     fields = [
         {
             "name": "Realized P&L (Closed Trades Only)",
@@ -267,13 +352,18 @@ async def run_analyst() -> None:
             "inline": True,
         },
         {
-            "name": "Unrealized (Open Positions)",
+            "name": "Unrealized (Live Prices)",
             "value": (
                 f"Unrealized P&L: ${unrealized_pnl:+.4f}\n"
                 f"Open Positions: {db_stats.get('open_positions', 0)}\n"
                 f"Closed Trades: {db_stats.get('closed_trades', 0)}"
             ),
             "inline": True,
+        },
+        {
+            "name": "Open Positions (Live)",
+            "value": open_positions_text[:1000],
+            "inline": False,
         },
     ]
 
