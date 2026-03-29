@@ -21,21 +21,23 @@ logger = logging.getLogger("polybot.key_vault")
 _PRIVATE_KEY: Optional[str] = None
 _CLOB_HOST: Optional[str] = None
 _CHAIN_ID: Optional[int] = None
+_FUNDER_ADDRESS: Optional[str] = None
 
 
-def init_vault(private_key: str, clob_host: str, chain_id: int = 137) -> None:
+def init_vault(private_key: str, clob_host: str, chain_id: int = 137, funder_address: str = "") -> None:
     """
     Load secrets into the vault at startup.
     Call this ONCE from main.py before any strategy runs.
     After this point, private_key must not be passed to any other function.
     """
-    global _PRIVATE_KEY, _CLOB_HOST, _CHAIN_ID
+    global _PRIVATE_KEY, _CLOB_HOST, _CHAIN_ID, _FUNDER_ADDRESS
     if _PRIVATE_KEY is not None:
         logger.warning("Vault already initialised — ignoring re-init call")
         return
     _PRIVATE_KEY = private_key
     _CLOB_HOST = clob_host
     _CHAIN_ID = chain_id
+    _FUNDER_ADDRESS = funder_address
     logger.info("KeyVault initialised — private key loaded (will not be logged or passed to agents)")
 
 
@@ -54,12 +56,10 @@ def get_client():
         return None
     try:
         from py_clob_client.client import ClobClient
-        client = ClobClient(
-            _CLOB_HOST,
-            key=_PRIVATE_KEY,
-            chain_id=_CHAIN_ID,
-            signature_type=0,  # EOA wallet (MetaMask / standard private key)
-        )
+        kwargs = dict(chain_id=_CHAIN_ID, signature_type=1)  # Magic Link / Polymarket-issued key
+        if _FUNDER_ADDRESS:
+            kwargs["funder"] = _FUNDER_ADDRESS
+        client = ClobClient(_CLOB_HOST, key=_PRIVATE_KEY, **kwargs)
         return client
     except Exception as exc:
         logger.error(f"KeyVault: failed to create ClobClient — {exc}")

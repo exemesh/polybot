@@ -135,11 +135,14 @@ class PolymarketClient:
             # Legacy fallback: direct key from settings
             if self.settings.PRIVATE_KEY:
                 try:
+                    funder = getattr(self.settings, "FUNDER_ADDRESS", "")
+                    kwargs = dict(chain_id=self.settings.CHAIN_ID, signature_type=1)
+                    if funder:
+                        kwargs["funder"] = funder
                     self._client = ClobClient(
                         self.settings.CLOB_HOST,
                         key=self.settings.PRIVATE_KEY,
-                        chain_id=self.settings.CHAIN_ID,
-                        signature_type=0,  # EOA wallet (MetaMask / standard private key)
+                        **kwargs,
                     )
                     try:
                         creds = self._client.create_or_derive_api_creds()

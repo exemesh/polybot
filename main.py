@@ -264,6 +264,7 @@ class PolyBot:
                 self.settings.PRIVATE_KEY,
                 self.settings.CLOB_HOST,
                 getattr(self.settings, "CHAIN_ID", 137),
+                funder_address=getattr(self.settings, "FUNDER_ADDRESS", ""),
             )
             logger.info(f"Security: {vault_repr()}")
         else:

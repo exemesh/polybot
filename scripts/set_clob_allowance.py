@@ -15,6 +15,7 @@ env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)
 
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
+FUNDER_ADDRESS = os.getenv("FUNDER_ADDRESS", "")
 if not PRIVATE_KEY:
     print("ERROR: PRIVATE_KEY not found in .env")
     sys.exit(1)
@@ -31,7 +32,11 @@ HOST = "https://clob.polymarket.com"
 CHAIN_ID = POLYGON
 
 print("Connecting to Polymarket CLOB...")
-client = ClobClient(HOST, key=PRIVATE_KEY, chain_id=CHAIN_ID)
+kwargs = dict(signature_type=1)  # Magic Link / Polymarket-issued key
+if FUNDER_ADDRESS:
+    kwargs["funder"] = FUNDER_ADDRESS
+    print(f"  funder: {FUNDER_ADDRESS}")
+client = ClobClient(HOST, key=PRIVATE_KEY, chain_id=CHAIN_ID, **kwargs)
 
 creds = client.create_or_derive_api_creds()
 client.set_api_creds(creds)
