@@ -241,8 +241,9 @@ class SwarmForecasterStrategy:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
                     f"{self.settings.GAMMA_HOST}/markets",
-                    params={"closed": "false", "order": "liquidityClob",
-                            "ascending": "false", "limit": "50"}
+                    params={"closed": "false", "active": "true",
+                            "order": "volume24hr", "ascending": "false",
+                            "limit": "200"}
                 )
             if resp.status_code != 200:
                 return []
@@ -275,26 +276,32 @@ class SwarmForecasterStrategy:
                 m["_hours"] = hours
 
                 # Price filter — skip near-certain or binary extremes
-                # Try both `tokens` (CLOB format) and `outcomes` (Gamma format)
+                # Gamma API: tokens=null, prices in outcomePrices=["0.78","0.22"]
+                # CLOB API:  tokens=[{outcome:"Yes", price:0.78}, ...]
+                yes_p = None
                 tokens = m.get("tokens") or []
                 yes_t = next((t for t in tokens if str(t.get("outcome", "")).upper() == "YES"), None)
-                # Fallback: if no tokens, try top-level price fields
-                if not yes_t:
-                    yes_p_raw = m.get("lastTradePrice") or m.get("outcomePrices")
-                    if isinstance(yes_p_raw, list):
-                        try:
-                            yes_p = float(yes_p_raw[0])
-                        except Exception:
-                            continue
-                    elif yes_p_raw is not None:
-                        try:
-                            yes_p = float(yes_p_raw)
-                        except Exception:
-                            continue
-                    else:
-                        continue
-                else:
+                if yes_t:
                     yes_p = float(yes_t.get("price") or 0)
+                else:
+                    op = m.get("outcomePrices")
+                    outcomes = m.get("outcomes") or []
+                    if isinstance(op, list) and len(op) > 0:
+                        # Find YES index from outcomes list
+                        try:
+                            yes_idx = next((i for i, o in enumerate(outcomes)
+                                           if str(o).lower() == "yes"), 0)
+                            yes_p = float(op[yes_idx])
+                        except Exception:
+                            pass
+                    elif isinstance(op, str):
+                        try:
+                            op_list = json.loads(op)
+                            yes_p = float(op_list[0])
+                        except Exception:
+                            pass
+                if yes_p is None:
+                    continue
 
                 if not (PRICE_MIN <= yes_p <= PRICE_MAX):
                     continue
