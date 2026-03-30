@@ -218,7 +218,7 @@ class SwarmForecasterStrategy:
             if trades >= MAX_TRADES_PER_CYCLE:
                 break
 
-            cid = market.get("condition_id", "")
+            cid = market.get("conditionId") or market.get("condition_id", "")
             if self.portfolio.has_open_position(cid):
                 continue
             if cid in self._traded and time.time() - self._traded[cid] < 14400:
@@ -268,7 +268,7 @@ class SwarmForecasterStrategy:
                         if end_dt.tzinfo is None:
                             end_dt = end_dt.replace(tzinfo=timezone.utc)
                         hours = (end_dt - now).total_seconds() / 3600
-                        if hours < 1 or hours > 720:
+                        if hours < 1 or hours > 8760:  # 1 year max
                             continue
                     except Exception:
                         pass  # unparseable date — allow through
@@ -352,7 +352,7 @@ class SwarmForecasterStrategy:
         self, market: Dict, news: List[str]
     ) -> Optional[Dict]:
         """Run ACTIVE_AGENT_COUNT-agent swarm evaluation. Returns trade signal or None."""
-        cid = market.get("condition_id", "")
+        cid = market.get("conditionId") or market.get("condition_id", "")
         question = market.get("question", "")
         yes_price = market["_yes_price"]
 
@@ -467,7 +467,7 @@ class SwarmForecasterStrategy:
 
     async def _execute_trade(self, market: Dict, signal: Dict) -> bool:
         """Execute a swarm-backed trade."""
-        cid = market.get("condition_id", "")
+        cid = market.get("conditionId") or market.get("condition_id", "")
         question = market.get("question", "")
         tokens = market.get("tokens", [])
         yes_t = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), None)
