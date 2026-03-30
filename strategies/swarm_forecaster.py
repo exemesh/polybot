@@ -44,7 +44,7 @@ TRADE_SIZE_USD      = 10.0      # $10 per trade
 MIN_DIVERGENCE      = 0.15      # 15% gap between swarm consensus and market price
 ACTIVE_AGENT_COUNT  = 10        # Phase 1: 10 agents. Bump to 50 once edge is confirmed.
 MIN_AGENT_AGREEMENT = 6         # At least 6 out of 10 agents must agree (60% consensus)
-MIN_LIQUIDITY_USD   = 5_000     # $5k minimum CLOB liquidity (lowered for broader market access)
+MIN_LIQUIDITY_USD   = 0         # No liquidity floor — let price/time filters do the work
 PRICE_MIN           = 0.15      # Skip near-certain outcomes (lottery tickets)
 PRICE_MAX           = 0.85
 MAX_TRADES_PER_CYCLE = 2
@@ -249,39 +249,61 @@ class SwarmForecasterStrategy:
 
             now = datetime.now(timezone.utc)
             eligible = []
-            for m in resp.json():
+            raw_markets = resp.json()
+            logger.info(f"SwarmForecaster: {len(raw_markets)} markets from Gamma API")
+
+            for m in raw_markets:
                 # Liquidity gate
-                liq = float(m.get("liquidityClob") or m.get("liquidityNum") or 0)
-                if liq < MIN_LIQUIDITY_USD:
+                liq = float(m.get("liquidityClob") or m.get("liquidityNum") or m.get("liquidity") or 0)
+                if MIN_LIQUIDITY_USD > 0 and liq < MIN_LIQUIDITY_USD:
                     continue
 
-                # Resolution time filter (2h - 30 days)
-                end_str = m.get("endDate") or m.get("end_date_iso") or ""
+                # Resolution time filter — skip if already expired or resolves in >30 days
+                end_str = (m.get("endDate") or m.get("end_date_iso") or
+                           m.get("endDateIso") or m.get("game_start_time") or "")
+                hours = 168  # default 7 days if no end date
                 if end_str:
                     try:
-                        end_dt = datetime.fromisoformat(
-                            end_str.replace("Z", "+00:00"))
+                        end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
                         if end_dt.tzinfo is None:
                             end_dt = end_dt.replace(tzinfo=timezone.utc)
                         hours = (end_dt - now).total_seconds() / 3600
-                        if hours < 2 or hours > 720:
+                        if hours < 1 or hours > 720:
                             continue
-                        m["_hours"] = hours
                     except Exception:
-                        continue
+                        pass  # unparseable date — allow through
+                m["_hours"] = hours
 
                 # Price filter — skip near-certain or binary extremes
-                tokens = m.get("tokens", [])
-                yes_t = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), None)
+                # Try both `tokens` (CLOB format) and `outcomes` (Gamma format)
+                tokens = m.get("tokens") or []
+                yes_t = next((t for t in tokens if str(t.get("outcome", "")).upper() == "YES"), None)
+                # Fallback: if no tokens, try top-level price fields
                 if not yes_t:
-                    continue
-                yes_p = float(yes_t.get("price") or 0)
+                    yes_p_raw = m.get("lastTradePrice") or m.get("outcomePrices")
+                    if isinstance(yes_p_raw, list):
+                        try:
+                            yes_p = float(yes_p_raw[0])
+                        except Exception:
+                            continue
+                    elif yes_p_raw is not None:
+                        try:
+                            yes_p = float(yes_p_raw)
+                        except Exception:
+                            continue
+                    else:
+                        continue
+                else:
+                    yes_p = float(yes_t.get("price") or 0)
+
                 if not (PRICE_MIN <= yes_p <= PRICE_MAX):
                     continue
 
                 m["_yes_price"] = yes_p
                 m["_liquidity"] = liq
                 eligible.append(m)
+
+            logger.info(f"SwarmForecaster: {len(eligible)} markets passed filters")
 
             # Sort by liquidity descending — most liquid = best price discovery
             eligible.sort(key=lambda x: x["_liquidity"], reverse=True)
