@@ -41,7 +41,7 @@ logger = logging.getLogger("polybot.swarm")
 
 # ─── Strategy constants ────────────────────────────────────────────────────────
 TRADE_SIZE_USD      = 10.0      # $10 per trade
-MIN_DIVERGENCE      = 0.15      # 15% gap between swarm consensus and market price
+MIN_DIVERGENCE      = 0.10      # 10% gap between swarm consensus and market price (auto-tuned: 15→10)
 ACTIVE_AGENT_COUNT  = 10        # Phase 1: 10 agents. Bump to 50 once edge is confirmed.
 MIN_AGENT_AGREEMENT = 6         # At least 6 out of 10 agents must agree (60% consensus)
 MIN_LIQUIDITY_USD   = 0         # No liquidity floor — let price/time filters do the work
