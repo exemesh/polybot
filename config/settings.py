@@ -71,17 +71,17 @@ class Settings:
 
     # ─── Strategy Toggles ───────────────────────────────────────────
     # ENABLED: Only research-backed strategies with real edge
-    ENABLE_GENERAL_SCANNER: bool = True      # Arb-only mode (3%+ edge, $50k+ liquidity)
     ENABLE_NEWS_ARB: bool = True             # Breaking news vs market lag
-    ENABLE_SWARM_FORECASTER: bool = True     # MiroFish-style 7-agent swarm consensus
-    # DISABLED: No real edge, spread-hunting only, or broken data sources
-    ENABLE_WEATHER_ARB: bool = False      # Disabled — public data, no edge
-    ENABLE_MARKET_MAKER: bool = False     # Disabled — requires continuous quoting
+    ENABLE_SWARM_FORECASTER: bool = True     # MiroFish 10-agent swarm consensus
+    # DISABLED: Spread-hunting caused losses — no genuine edge confirmed
+    ENABLE_GENERAL_SCANNER: bool = False     # DISABLED — spread edge is fake, caused $60 loss
+    ENABLE_WEATHER_ARB: bool = False         # Disabled — public data, no edge
+    ENABLE_MARKET_MAKER: bool = False        # Disabled — requires continuous quoting
     ENABLE_CROSS_PLATFORM_ARB: bool = False  # Disabled — Kalshi data unreliable
-    ENABLE_MOMENTUM_SCALPER: bool = False # Disabled — favorites are favorites for a reason
-    ENABLE_SPREAD_CAPTURE: bool = False   # Disabled — 0.1% edge lost to slippage
-    ENABLE_SPORTS_INTEL: bool = False     # Disabled — odds API data unreliable
-    ENABLE_AI_FORECASTER: bool = False    # Disabled — LLM hallucinations, no real edge
+    ENABLE_MOMENTUM_SCALPER: bool = False    # Disabled — favorites are favorites for a reason
+    ENABLE_SPREAD_CAPTURE: bool = False      # Disabled — 0.1% edge lost to slippage
+    ENABLE_SPORTS_INTEL: bool = False        # Disabled — odds API data unreliable
+    ENABLE_AI_FORECASTER: bool = False       # Disabled — single LLM, no consensus
     ODDS_API_KEY: str = field(default_factory=lambda: os.getenv("ODDS_API_KEY", ""))
     DRY_RUN: bool = field(default_factory=lambda: os.getenv("DRY_RUN", "true").lower() == "true")
 
