@@ -331,7 +331,6 @@ def build_html() -> str:
 <nav>
   <span class="brand">🔱 Exemesh</span>
   <a href="#" onclick="showTab('polybot');return false" class="active" id="tab-polybot">Polybot</a>
-  <a href="#" onclick="showTab('binance');return false" id="tab-binance">Binancebot</a>
   <a href="#" onclick="showTab('infra');return false" id="tab-infra">Infrastructure</a>
   <a href="http://localhost:4000/costs" target="_blank" class="btn-apex" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;background:#007bff22;color:#58a6ff;border:1px solid #58a6ff55;text-decoration:none">↗ Apex Panel (4000)</a>
   <span class="time">⟳ 30s &nbsp;·&nbsp; {now}</span>
@@ -385,41 +384,6 @@ def build_html() -> str:
   <div class="section">
     <h2>📜 Polybot Logs</h2>
     <div class="log-box">{poly_log_html}</div>
-  </div>
-</div>
-
-<!-- ══ BINANCEBOT TAB ═══════════════════════════════════════════════════ -->
-<div class="tab-content" id="binance">
-
-  <div class="grid">
-    <div class="card">
-      <div class="lbl">Deployed</div>
-      <div class="val">${bin_deployed:.2f}</div>
-      <div class="sub">of ${bin_capital:.0f} capital</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Funding (8h)</div>
-      <div class="val" style="color:#2ecc71">${bin_funding:.4f}</div>
-      <div class="sub">~{(bin_funding * 3 * 365 / max(bin_capital, 1) * 100):.1f}% APY est.</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Positions</div>
-      <div class="val">{len(bin_positions)}</div>
-      <div class="sub">{'⚠ data stale' if bin_stale else f'Updated: {bin_disp}'}</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>📊 Open Positions</h2>
-    <table>
-      <thead><tr><th>Symbol</th><th>Size (USDT)</th><th>Entry Price</th><th>Funding Collected</th></tr></thead>
-      <tbody>{bin_pos_rows}</tbody>
-    </table>
-  </div>
-
-  <div class="section">
-    <h2>📜 Binancebot Logs (last 10)</h2>
-    <div class="log-box">{bin_log_html}</div>
   </div>
 </div>
 
@@ -490,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/dashboard", "/polybot", "/binance", "/infra"):
+        if path in ("/", "/dashboard", "/polybot", "/infra"):
             html = build_html().encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
