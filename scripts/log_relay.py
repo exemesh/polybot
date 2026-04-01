@@ -16,9 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-POLYBOT_LOG    = Path.home() / "polybot/logs/polybot.log"
-BINANCE_LOG    = Path.home() / "bots/binancebot/logs/binancebot.log"
-ERROR_LOG      = Path.home() / "polybot/logs/polybot.error.log"
+POLYBOT_LOG    = Path("/Users/Shared/polybot/logs/stdout.log")
+ERROR_LOG      = Path("/Users/Shared/polybot/logs/stderr.log")
 STATE_FILE     = Path.home() / ".log_relay_state.json"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_SENTINEL",
     "https://discord.com/api/webhooks/1483222190961721465/"
@@ -111,7 +110,7 @@ def main():
     # Polybot is a one-shot launchd job (runs every 5 min then exits).
     # Don't check for live process — check last_bot_run timestamp instead.
     # Alert only if the bot hasn't run in > 15 minutes (3 missed cycles).
-    bot_control = Path.home() / "polybot/data/bot_control.json"
+    bot_control = Path.home() / "nanoclaw/groups/discord_main/polybot/data/bot_control.json"
     try:
         ctrl = json.loads(bot_control.read_text())
         last_run_str = ctrl.get("last_bot_run") or ctrl.get("updated_at", "")
