@@ -463,21 +463,26 @@ class PolyBot:
             open_positions=len(self.portfolio.get_open_positions()),
         )
 
-        # ── Win rate monitoring ──
+        # ── Win rate monitoring (debounced: max 1 alert per hour) ──
         try:
             wr_result = check_win_rate(self.portfolio)
             if wr_result.status in ("warn", "recalibrate"):
-                alert_msg = format_discord_alert(wr_result)
-                logging.warning(f"Win rate monitor: {wr_result.message}")
-                # Post to Sentinel channel if webhook available
-                sentinel_webhook = getattr(self.settings, 'DISCORD_WEBHOOK_SENTINEL',
-                                           os.getenv('DISCORD_WEBHOOK_SENTINEL', ''))
-                if sentinel_webhook:
-                    try:
-                        import requests
-                        requests.post(sentinel_webhook, json={"content": alert_msg}, timeout=10)
-                    except Exception:
-                        pass
+                _wr_alert_file = Path(self.settings.DATA_DIR) / "wr_last_alert.txt"
+                _now_ts = time.time()
+                _last_alert = float(_wr_alert_file.read_text()) if _wr_alert_file.exists() else 0.0
+                if _now_ts - _last_alert > 3600:  # only alert once per hour
+                    alert_msg = format_discord_alert(wr_result)
+                    logging.warning(f"Win rate monitor: {wr_result.message}")
+                    _wr_alert_file.write_text(str(_now_ts))
+                    # Post to Sentinel channel if webhook available
+                    sentinel_webhook = getattr(self.settings, 'DISCORD_WEBHOOK_SENTINEL',
+                                               os.getenv('DISCORD_WEBHOOK_SENTINEL', ''))
+                    if sentinel_webhook:
+                        try:
+                            import requests
+                            requests.post(sentinel_webhook, json={"content": alert_msg}, timeout=10)
+                        except Exception:
+                            pass
         except Exception as e:
             logging.warning(f"Win rate monitor error: {e}")
 
