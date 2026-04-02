@@ -1,5 +1,5 @@
 """
-Apex Coordinator — Runs Recon, Blaze, Sage, and Sentinel agents in parallel.
+Apex Coordinator — Runs Amara (Intelligence & Trading) and Pia (Analytics & Risk) in parallel.
 Sends ONE startup message per calendar day (first run only).
 """
 
@@ -67,7 +67,7 @@ async def _run_agent(name: str, coro) -> None:
 
 async def _send_startup_message(discord: DiscordAlerts) -> None:
     """Send a single startup message to the apex-command channel."""
-    content = "🔱 Apex online. Swarm active — Recon, Sage and Sentinel running."
+    content = "🔱 Apex online. Amara (Intelligence) and Pia (Analytics & Risk) are active."
     await discord._post_channel_message(APEX_COMMAND_CHANNEL, content)
     logger.info("Apex: startup message sent to #apex-command.")
 
@@ -80,7 +80,7 @@ async def run_apex() -> None:
 
     On first run of each calendar day: sends a startup message to #apex-command.
     On subsequent runs of the same day: skips the startup message silently.
-    Then runs Recon, Sage, and Sentinel concurrently via asyncio.gather().
+    Then runs Amara and Pia concurrently via asyncio.gather().
     Each agent is wrapped so its failure cannot crash the other agents.
     """
     logger.info("Apex coordinator starting...")
@@ -92,7 +92,7 @@ async def run_apex() -> None:
     today_str = now.strftime("%Y-%m-%d")
 
     # Only send startup message once per calendar day AND only during morning/evening windows
-    # Morning: 07:00-09:00 UTC (07:00-09:00 WAT) | Evening: 16:00-18:00 UTC (16:00-18:00 WAT)
+    # Morning: 07:00-09:00 UTC | Evening: 16:00-18:00 UTC
     current_hour = now.hour
     in_briefing_window = (7 <= current_hour < 9) or (16 <= current_hour < 18)
     last_startup_date = _load_last_startup_date()
@@ -108,15 +108,13 @@ async def run_apex() -> None:
             logger.warning(f"Apex: startup message failed: {exc}")
 
     # Lazy imports to avoid circular imports at module load time
-    from agents.scout import run_scout
-    from agents.analyst import run_analyst
-    from agents.guardian import run_guardian
+    from agents.amara import run_amara
+    from agents.pia import run_pia
 
-    # Run all three agents in parallel
+    # Run both agents in parallel
     await asyncio.gather(
-        _run_agent("Recon", run_scout()),
-        _run_agent("Sage", run_analyst()),
-        _run_agent("Sentinel", run_guardian()),
+        _run_agent("Amara", run_amara()),
+        _run_agent("Pia", run_pia()),
         return_exceptions=True,  # Never propagate — Apex itself should not crash
     )
 
