@@ -42,13 +42,13 @@ logger = logging.getLogger("polybot.swarm")
 # ─── Strategy constants ────────────────────────────────────────────────────────
 TRADE_SIZE_USD      = 10.0      # $10 per trade
 MIN_DIVERGENCE      = 0.10      # 10% gap between swarm consensus and market price (auto-tuned: 15→10)
-ACTIVE_AGENT_COUNT  = 10        # Phase 1: 10 agents. Bump to 50 once edge is confirmed.
-MIN_AGENT_AGREEMENT = 6         # At least 6 out of 10 agents must agree (60% consensus)
+ACTIVE_AGENT_COUNT  = 5         # Phase 1: 10 agents. Bump to 50 once edge is confirmed.
+MIN_AGENT_AGREEMENT = 3         # At least 6 out of 10 agents must agree (60% consensus)
 MIN_LIQUIDITY_USD   = 0         # No liquidity floor — let price/time filters do the work
 PRICE_MIN           = 0.15      # Skip near-certain outcomes (lottery tickets)
 PRICE_MAX           = 0.85
 MAX_TRADES_PER_CYCLE = 2
-CACHE_TTL_SECONDS   = 3600      # Re-evaluate each market at most once per hour
+CACHE_TTL_SECONDS   = 21600      # Re-evaluate each market at most once per hour
 AGENT_BATCH_SIZE    = 10        # Run in batches of 10 to respect rate limits
 AGENT_BATCH_DELAY   = 0.5       # 500ms between batches
 
