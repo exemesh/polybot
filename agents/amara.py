@@ -1,5 +1,5 @@
 """
-Amara — Intelligence & Trading Agent → #scout-intel
+Amara — Intelligence & Trading Agent → #amara
 Scans Polymarket for opportunities, buffers throughout the day,
 and posts digests at 9AM, 12PM and 6PM UTC.
 Urgent opportunities (edge > 5% or volume > $1M) are posted immediately.
@@ -18,7 +18,7 @@ from utils.discord_alerts import DiscordAlerts
 logger = logging.getLogger("polybot.amara")
 
 # Discord channel
-AMARA_CHANNEL = "1483029658072121355"
+AMARA_CHANNEL = "1483029658072121355"   # #amara
 
 # Polymarket Gamma API
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"

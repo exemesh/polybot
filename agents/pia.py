@@ -1,7 +1,7 @@
 """
-Pia — Analytics & Risk Agent
-  • P&L reports → #analyst-dashboard at 8AM and 5PM UTC
-  • Risk alerts  → #guardian-alerts on emergencies only (halt, critical loss)
+Pia — Analytics & Risk Agent → #pia
+  • P&L reports at 8AM and 5PM UTC
+  • Risk alerts on emergencies only (halt, critical loss)
 Deduplicates all alerts and reports per day.
 """
 
@@ -18,9 +18,8 @@ from utils.discord_alerts import DiscordAlerts
 
 logger = logging.getLogger("polybot.pia")
 
-# Discord channels
-ANALYTICS_CHANNEL = "1483029691689341110"   # #analyst-dashboard
-RISK_CHANNEL = "1483029707329896471"         # #guardian-alerts
+# Single Pia channel for both analytics and risk alerts
+PIA_CHANNEL = "1483029691689341110"   # #pia
 
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
 
@@ -511,7 +510,7 @@ async def _run_analytics(discord: DiscordAlerts, current_hour: int, now: datetim
             avatar_url="https://i.imgur.com/OB0y6MR.png",
         )
     else:
-        await discord._post_channel_message(ANALYTICS_CHANNEL, embed)
+        await discord._post_channel_message(PIA_CHANNEL, embed)
     logger.info(f"Pia analytics report posted ({slot_label} UTC).")
 
     _analytics_mark_posted(last_posts, current_hour)
@@ -567,7 +566,7 @@ async def _run_risk_monitor(discord: DiscordAlerts, now: datetime) -> None:
                         avatar_url="https://i.imgur.com/OB0y6MR.png",
                     )
                 else:
-                    await discord._post_channel_message(RISK_CHANNEL, embed)
+                    await discord._post_channel_message(PIA_CHANNEL, embed)
                 _mark_sent(sent_data, alert_key)
                 alert_count += 1
                 logger.warning("Pia: trading is halted — alert sent.")
@@ -598,7 +597,7 @@ async def _run_risk_monitor(discord: DiscordAlerts, now: datetime) -> None:
                         avatar_url="https://i.imgur.com/OB0y6MR.png",
                     )
                 else:
-                    await discord._post_channel_message(RISK_CHANNEL, embed)
+                    await discord._post_channel_message(PIA_CHANNEL, embed)
                 _mark_sent(sent_data, alert_key)
                 alert_count += 1
                 logger.warning(f"Pia: daily P&L critical loss alert sent (${daily_pnl:.4f}).")
