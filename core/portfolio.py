@@ -74,6 +74,16 @@ class Portfolio:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_closed_trades_since(self, since_ts: str) -> List[Dict]:
+        """Return closed trades with closed_at > since_ts. Used by EvolutionEngine."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status IN ('won','lost','resolved','expired') "
+                "AND closed_at > ? ORDER BY closed_at ASC",
+                (since_ts,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def has_open_position(self, market_id: str) -> bool:
         """Check if we already have an open position in this market (by market_id)."""
         with self._get_conn() as conn:
