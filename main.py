@@ -520,12 +520,12 @@ class PolyBot:
             await strategy.cleanup()
         await self.profit_taker.cleanup()
 
-        # Run the Apex agent swarm (Scout, Analyst, Guardian)
+        # Run Nyx — supreme coordinator (Amara + Pia)
         try:
-            from agents.apex import run_apex
-            await run_apex()
+            from agents.nyx import run_nyx
+            await run_nyx()
         except Exception as e:
-            logger.error(f"Apex coordinator failed: {e}", exc_info=True)
+            logger.error(f"Nyx coordinator failed: {e}", exc_info=True)
 
 
 def main():
