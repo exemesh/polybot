@@ -286,7 +286,7 @@ class MetaAgent:
     # ── Discord alert ─────────────────────────────────────────────────────────
 
     async def _post_trade_alert(self, sig: Signal):
-        webhook = getattr(self.settings, "DISCORD_WEBHOOK_BLAZE", "")
+        webhook = getattr(self.settings, "DISCORD_WEBHOOK_AMARA", "") or getattr(self.settings, "DISCORD_WEBHOOK_BLAZE", "")
         if not webhook:
             return
         mode = "DRY RUN" if self.settings.DRY_RUN else "LIVE"
