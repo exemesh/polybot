@@ -332,7 +332,7 @@ def build_html() -> str:
   <span class="brand">🔱 Exemesh</span>
   <a href="#" onclick="showTab('polybot');return false" class="active" id="tab-polybot">Polybot</a>
   <a href="#" onclick="showTab('infra');return false" id="tab-infra">Infrastructure</a>
-  <a href="http://localhost:4000/costs" target="_blank" class="btn-apex" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;background:#007bff22;color:#58a6ff;border:1px solid #58a6ff55;text-decoration:none">↗ Apex Panel (4000)</a>
+  <span style="padding:5px 12px;font-size:12px;color:#888">exemesh.dev</span>
   <span class="time">⟳ 30s &nbsp;·&nbsp; {now}</span>
 </nav>
 
@@ -401,9 +401,9 @@ def build_html() -> str:
       <div class="sub">{'🟢 on schedule' if mins_ago and mins_ago < 10 else '⚠ check launchd' if mins_ago and mins_ago > 15 else ''}</div>
     </div>
     <div class="card">
-      <div class="lbl">Apex Panel</div>
-      <div class="val" style="font-size:14px"><a href="http://localhost:4000/costs" target="_blank" style="color:#58a6ff">Open ↗</a></div>
-      <div class="sub">localhost:4000</div>
+      <div class="lbl">Dashboard</div>
+      <div class="val" style="font-size:14px"><a href="https://exemesh.dev" target="_blank" style="color:#58a6ff">exemesh.dev ↗</a></div>
+      <div class="sub">live dashboard</div>
     </div>
   </div>
 
