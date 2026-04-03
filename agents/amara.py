@@ -1,15 +1,23 @@
 """
-Amara — Intelligence & Trading Agent → #amara
-Scans Polymarket for opportunities, buffers throughout the day,
-and posts digests at 9AM, 12PM and 6PM UTC.
-Urgent opportunities (edge > 5% or volume > $1M) are posted immediately.
+Amara — Trade Execution Alert Agent → #amara
+
+Posts to Discord ONLY when a trade has actually been EXECUTED (filled)
+by polybot or kalbot, and only when edge ≥ 15%.
+
+No more opportunity spam — if polybot/kalbot didn't pull the trigger,
+Amara stays silent.
+
+Tracks last-seen trade IDs in data/amara_seen_trades.json to avoid
+duplicate alerts across cycles.
 """
 
 import asyncio
 import json
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 
@@ -17,268 +25,222 @@ from utils.discord_alerts import DiscordAlerts
 
 logger = logging.getLogger("polybot.amara")
 
+# ── Paths ─────────────────────────────────────────────────────────────────────
+_ROOT        = Path(__file__).parent.parent
+DATA_DIR     = _ROOT / "data"
+DB_PATH      = DATA_DIR / "polybot.db"
+SEEN_PATH    = DATA_DIR / "amara_seen_trades.json"
+
+# Kalbot status lives one directory up
+KALBOT_STATUS = _ROOT.parent / "kalbot" / "data" / "status.json"
+
 # Discord channel
 AMARA_CHANNEL = "1483029658072121355"   # #amara
 
-# Polymarket Gamma API
-POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
+# Only alert on trades with edge at or above this threshold
+MIN_EDGE_PCT = 15.0
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+# Strategy display names
+STRATEGY_LABELS = {
+    "swarm_forecaster":      "SwarmForecaster",
+    "news_arb":              "NewsArb",
+    "P1_SentimentSpike":     "P1 · SentimentSpike",
+    "P2_OverreactionFader":  "P2 · OverreactionFader",
+    "P3_LiquiditySniper":    "P3 · LiquiditySniper",
+    "K1_FairValue":          "K1 · FairValue",
+    "K2_Resolution":         "K2 · Resolution",
+    "K3_SpreadCapture":      "K3 · SpreadCapture",
+}
 
-BUFFER_PATH = os.path.join(DATA_DIR, "amara_opportunity_buffer.json")
-LAST_POSTS_PATH = os.path.join(DATA_DIR, "amara_last_posts.json")
 
-# Digest post hours (UTC)
-DIGEST_HOURS = {9, 12, 18}
+# ── Seen-trades tracker ───────────────────────────────────────────────────────
 
-# Thresholds for immediate urgent posting
-URGENT_EDGE_PCT = 5.0
-URGENT_VOLUME = 1_000_000.0
-
-
-# ── Buffer helpers ───────────────────────────────────────────────────────────
-
-def _load_buffer() -> list[dict]:
+def _load_seen() -> dict:
     try:
-        if os.path.exists(BUFFER_PATH):
-            with open(BUFFER_PATH) as f:
-                data = json.load(f)
-                return data.get("opportunities", [])
-    except Exception as exc:
-        logger.warning(f"Failed to load opportunity buffer: {exc}")
-    return []
+        if SEEN_PATH.exists():
+            return json.loads(SEEN_PATH.read_text())
+    except Exception:
+        pass
+    return {"polybot_ids": [], "kalbot_tickers": []}
 
 
-def _save_buffer(opportunities: list[dict]) -> None:
+def _save_seen(seen: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SEEN_PATH.write_text(json.dumps(seen, indent=2))
+
+
+# ── Polybot trade reader ──────────────────────────────────────────────────────
+
+def fetch_new_polybot_trades(seen_ids: list) -> list[dict]:
+    """Read newly executed polybot trades from SQLite. Only live fills with edge ≥ 15%."""
+    if not DB_PATH.exists():
+        return []
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(BUFFER_PATH, "w") as f:
-            json.dump(
-                {
-                    "opportunities": opportunities,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                },
-                f,
-            )
-    except Exception as exc:
-        logger.warning(f"Failed to save opportunity buffer: {exc}")
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        # Only live trades that aren't in seen list
+        placeholders = ",".join("?" * len(seen_ids)) if seen_ids else "NULL"
+        query = f"""
+            SELECT id, strategy, market_question, side, price, size_usd,
+                   edge_pct, order_id, status, timestamp
+            FROM trades
+            WHERE dry_run = 0
+              AND status IN ('open', 'filled', 'won', 'lost', 'closed')
+              AND edge_pct >= ?
+              {"AND id NOT IN (" + placeholders + ")" if seen_ids else ""}
+            ORDER BY id DESC LIMIT 20
+        """
+        params = [MIN_EDGE_PCT] + (seen_ids if seen_ids else [])
+        rows = cur.fetchall() if False else cur.execute(query, params).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Amara: polybot DB read failed: {e}")
+        return []
 
 
-def _clear_buffer() -> None:
-    _save_buffer([])
+# ── Kalbot position reader ────────────────────────────────────────────────────
 
-
-# ── Last-posts helpers ───────────────────────────────────────────────────────
-
-def _load_last_posts() -> dict:
+def fetch_new_kalbot_positions(seen_tickers: list) -> list[dict]:
+    """Read new filled positions from kalbot status.json. Only entries with edge ≥ 15%."""
     try:
-        if os.path.exists(LAST_POSTS_PATH):
-            with open(LAST_POSTS_PATH) as f:
-                return json.load(f)
-    except Exception as exc:
-        logger.warning(f"Failed to load last posts: {exc}")
-    return {}
+        if not KALBOT_STATUS.exists():
+            return []
+        data = json.loads(KALBOT_STATUS.read_text())
+        positions = data.get("positions", [])
+        new_fills = []
+        for pos in positions:
+            ticker = pos.get("ticker", "")
+            if ticker in seen_tickers:
+                continue
+            edge = pos.get("edge_pct", 0.0)
+            # Kalbot K1 requires >12% edge; if edge_pct not stored, check entry price
+            # as a proxy (entries below 30¢ on YES = asymmetric bet, likely high edge)
+            if edge == 0.0:
+                entry = pos.get("entry_price_cents", 50)
+                # Rough proxy: if YES bought < 35¢, assume edge ≥ 15%
+                edge = max(0.0, (35 - entry) * 2.0) if pos.get("side") == "yes" and entry < 35 else 0.0
+            if edge >= MIN_EDGE_PCT:
+                pos["_edge_pct"] = round(edge, 1)
+                new_fills.append(pos)
+        return new_fills
+    except Exception as e:
+        logger.warning(f"Amara: kalbot status read failed: {e}")
+        return []
 
 
-def _save_last_posts(data: dict) -> None:
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(LAST_POSTS_PATH, "w") as f:
-            json.dump(data, f)
-    except Exception as exc:
-        logger.warning(f"Failed to save last posts: {exc}")
+# ── Discord alert builders ────────────────────────────────────────────────────
 
-
-def _digest_slot_key(hour: int) -> str:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return f"{today}_{hour}h"
-
-
-def _already_posted_slot(last_posts: dict, hour: int) -> bool:
-    return last_posts.get(_digest_slot_key(hour)) is not None
-
-
-def _mark_slot_posted(last_posts: dict, hour: int) -> None:
-    last_posts[_digest_slot_key(hour)] = datetime.now(timezone.utc).isoformat()
-
-
-# ── Polymarket fetch ─────────────────────────────────────────────────────────
-
-async def fetch_polymarket_opportunities() -> list[dict]:
-    """Scan Polymarket Gamma API for mispriced / high-value open markets."""
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                f"{POLYMARKET_GAMMA_URL}/markets",
-                params={
-                    "closed": "false",
-                    "limit": 100,
-                    "order": "volume24hr",
-                    "ascending": "false",
-                },
-            )
-            if resp.status_code == 200:
-                markets = resp.json()
-                opportunities = []
-                for m in markets:
-                    best_ask = float(m.get("bestAsk") or 0)
-                    best_bid = float(m.get("bestBid") or 0)
-                    last_price = float(m.get("lastTradePrice") or m.get("price") or 0)
-                    vol_24h = float(m.get("volume24hr") or 0)
-                    vol_total = float(m.get("volume") or 0)
-
-                    if best_ask <= 0 or best_bid <= 0 or vol_24h < 500:
-                        continue
-
-                    mid = (best_ask + best_bid) / 2
-                    spread = best_ask - best_bid
-
-                    spread_inefficiency = (spread / mid * 100) if mid > 0 else 0
-                    momentum_gap = abs(last_price - mid) * 100 if last_price > 0 else 0
-                    in_uncertainty_zone = 0.20 <= mid <= 0.80
-
-                    edge_score = round(
-                        (spread_inefficiency * 0.5) + (momentum_gap * 0.3) + (5.0 if in_uncertainty_zone else 0),
-                        2,
-                    )
-
-                    opportunities.append({
-                        "question": m.get("question", "")[:120],
-                        "best_bid": round(best_bid, 4),
-                        "best_ask": round(best_ask, 4),
-                        "mid_price": round(mid, 4),
-                        "spread": round(spread, 4),
-                        "last_price": round(last_price, 4),
-                        "edge_pct": edge_score,
-                        "volume_24h": vol_24h,
-                        "volume_total": vol_total,
-                        "in_uncertainty_zone": in_uncertainty_zone,
-                    })
-
-                opportunities.sort(key=lambda x: x["edge_pct"], reverse=True)
-                return opportunities[:10]
-    except Exception as exc:
-        logger.warning(f"Polymarket Gamma fetch failed: {exc}")
-    return []
-
-
-# ── Discord posting helpers ──────────────────────────────────────────────────
-
-def _build_opp_line(opp: dict) -> str:
-    q = opp.get("question", "")[:80]
-    bid = opp.get("best_bid", 0)
-    ask = opp.get("best_ask", 0)
-    mid = opp.get("mid_price", (bid + ask) / 2 if bid and ask else 0)
-    vol = opp.get("volume_24h", 0)
-    edge = opp.get("edge_pct", 0)
-    zone = "🎯" if opp.get("in_uncertainty_zone") else "⚡"
-    return f"{zone} {q}\n  Mid: {mid:.3f} (Bid {bid:.3f} / Ask {ask:.3f}) | Score: {edge:.1f} | 24h: ${vol:,.0f}"
-
-
-async def _post_urgent(discord: DiscordAlerts, opp: dict) -> None:
-    line = _build_opp_line(opp)
-    embed = {
-        "title": "⚠️ URGENT — Amara Opportunity",
-        "description": "High-priority opportunity detected (edge > 5% or volume > $1M)",
-        "color": 0xFF4500,
-        "fields": [{"name": "Opportunity", "value": line, "inline": False}],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "PolyBot Amara — URGENT"},
-    }
-    await discord._post_channel_message(AMARA_CHANNEL, embed)
-    logger.info(f"Amara URGENT post sent: {opp.get('question', '')[:60]}")
-
-
-async def _post_digest(discord: DiscordAlerts, buffered: list[dict], hour: int) -> None:
-    if not buffered:
-        logger.info(f"Amara: digest slot {hour}h — buffer empty, nothing to post.")
+async def _post_trade_alert(discord: DiscordAlerts, trade: dict, bot: str) -> None:
+    """Post a single executed-trade alert embed."""
+    webhook_url = os.getenv("DISCORD_WEBHOOK_AMARA", "")
+    if not webhook_url:
         return
 
-    opp_lines = [_build_opp_line(o) for o in buffered[:5]]
-    slot_label = {9: "9AM", 12: "12PM", 18: "6PM"}.get(hour, f"{hour}h")
+    if bot == "polybot":
+        strat_raw  = trade.get("strategy", "unknown")
+        strat      = STRATEGY_LABELS.get(strat_raw, strat_raw)
+        question   = trade.get("market_question", "?")[:120]
+        side       = trade.get("side", "?").replace("BUY_", "")
+        price      = trade.get("price", 0)
+        size       = trade.get("size_usd", 0)
+        edge       = trade.get("edge_pct", 0)
+        order_id   = trade.get("order_id", "")[:12]
+        ts         = trade.get("timestamp", "")[:16]
+        color      = 0x00C851   # green
+        title      = f"✅ Trade Executed — Polymarket"
+        desc_lines = [
+            f"**{question}**",
+            f"",
+            f"Side: **{side}** | Price: **{price:.0%}** | Size: **${size:.2f}**",
+            f"Edge: **{edge:.1f}%** | Strategy: `{strat}`",
+            f"Order: `{order_id}` | Placed: {ts} UTC",
+        ]
+    else:
+        ticker    = trade.get("ticker", "?")
+        side      = trade.get("side", "?").upper()
+        entry     = trade.get("entry_price_cents", 0)
+        count     = trade.get("count", 0)
+        size      = trade.get("size_usd", 0)
+        edge      = trade.get("_edge_pct", 0)
+        opened    = trade.get("opened_at", "")[:16]
+        strat     = STRATEGY_LABELS.get(trade.get("strategy", "K1_FairValue"), "K1 · FairValue")
+        color     = 0x007BFF   # blue for Kalshi
+        title     = f"✅ Trade Executed — Kalshi"
+        desc_lines = [
+            f"**`{ticker}`**",
+            f"",
+            f"Side: **{side}** | Entry: **{entry}¢** | Contracts: **×{count}** | Size: **${size:.2f}**",
+            f"Edge: **~{edge:.0f}%** | Strategy: `{strat}`",
+            f"Opened: {opened} UTC",
+        ]
 
     embed = {
-        "title": f"Amara Intel Digest — {slot_label} UTC",
-        "description": f"{len(buffered)} opportunit{'y' if len(buffered) == 1 else 'ies'} accumulated since last digest",
-        "color": 0x007BFF,
-        "fields": [
-            {
-                "name": "Buffered Opportunities",
-                "value": "\n".join(opp_lines),
-                "inline": False,
-            }
-        ],
+        "title": title,
+        "description": "\n".join(desc_lines),
+        "color": color,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "footer": {"text": "PolyBot Amara"},
+        "footer": {"text": f"Amara · {bot} LIVE"},
     }
 
-    webhook_url = os.getenv("DISCORD_WEBHOOK_AMARA", "")
-    if webhook_url:
-        await discord.send_webhook(
-            webhook_url, embed=embed,
-            username="Amara",
-            avatar_url="https://i.imgur.com/fJRm4Vk.png",
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post(
+            webhook_url,
+            json={"username": "Amara", "embeds": [embed]},
         )
-    else:
-        await discord._post_channel_message(AMARA_CHANNEL, embed)
-    logger.info(f"Amara digest posted at {slot_label} UTC ({len(buffered)} opportunities).")
+    logger.info(f"Amara: trade alert posted ({bot}) — {trade.get('market_question', trade.get('ticker', '?'))[:60]}")
 
 
-# ── Main entry point ─────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 async def run_amara() -> None:
     """
-    Main Amara Intelligence agent.
+    Amara Intelligence agent.
 
     Each run:
-      1. Fetch current Polymarket opportunities.
-      2. Add any new ones (by question text) to the buffer.
-      3. Post URGENT immediately if edge > 5% or volume > $1M.
-      4. At 9AM, 12PM, or 6PM UTC (once per slot), post the full digest and clear the buffer.
+      1. Read new FILLED trades from polybot DB (edge ≥ 15%)
+      2. Read new FILLED positions from kalbot status.json (edge ≥ 15%)
+      3. Post an alert for each new trade — then mark as seen
+      4. Never post about opportunities that weren't executed
     """
     logger.info("Amara agent starting...")
 
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
-    discord = DiscordAlerts(bot_token=bot_token)
+    discord   = DiscordAlerts(bot_token=bot_token)
 
-    now = datetime.now(timezone.utc)
-    current_hour = now.hour
+    seen         = _load_seen()
+    seen_poly    = seen.get("polybot_ids", [])
+    seen_kal     = seen.get("kalbot_tickers", [])
 
-    opps = await fetch_polymarket_opportunities()
-    if isinstance(opps, Exception):
-        logger.error(f"Polymarket fetch failed: {opps}")
-        opps = []
+    alerted = 0
 
-    buffer = _load_buffer()
-    buffered_questions = {o.get("question", "") for o in buffer}
-    new_opps = [o for o in opps if o.get("question", "") not in buffered_questions]
+    # ── Polybot executed trades ─────────────────────────────────────────────
+    poly_trades = await asyncio.to_thread(fetch_new_polybot_trades, seen_poly)
+    for trade in poly_trades:
+        try:
+            await _post_trade_alert(discord, trade, "polybot")
+            seen_poly.append(trade["id"])
+            alerted += 1
+        except Exception as exc:
+            logger.error(f"Amara: polybot alert failed: {exc}")
 
-    buffer.extend(new_opps)
-    _save_buffer(buffer)
-    logger.info(f"Amara: {len(new_opps)} new opportunities added to buffer (buffer size: {len(buffer)}).")
+    # ── Kalbot executed trades ──────────────────────────────────────────────
+    kal_positions = await asyncio.to_thread(fetch_new_kalbot_positions, seen_kal)
+    for pos in kal_positions:
+        try:
+            await _post_trade_alert(discord, pos, "kalbot")
+            seen_kal.append(pos["ticker"])
+            alerted += 1
+        except Exception as exc:
+            logger.error(f"Amara: kalbot alert failed: {exc}")
 
-    # ── Urgent immediate posts ──────────────────────────────────────────────
-    for opp in new_opps:
-        edge = opp.get("edge_pct", 0)
-        vol = opp.get("volume_24h", 0)
-        if edge > URGENT_EDGE_PCT or vol > URGENT_VOLUME:
-            try:
-                await _post_urgent(discord, opp)
-            except Exception as exc:
-                logger.error(f"Amara: failed to post urgent opportunity: {exc}")
+    # Keep seen lists bounded (last 500 each)
+    seen["polybot_ids"]      = seen_poly[-500:]
+    seen["kalbot_tickers"]   = seen_kal[-500:]
+    _save_seen(seen)
 
-    # ── Scheduled digest post ───────────────────────────────────────────────
-    if current_hour in DIGEST_HOURS:
-        last_posts = _load_last_posts()
-        if not _already_posted_slot(last_posts, current_hour):
-            try:
-                await _post_digest(discord, buffer, current_hour)
-                _mark_slot_posted(last_posts, current_hour)
-                _save_last_posts(last_posts)
-                _clear_buffer()
-            except Exception as exc:
-                logger.error(f"Amara: failed to post digest at {current_hour}h: {exc}")
-        else:
-            logger.info(f"Amara: digest slot {current_hour}h already posted today — skipping.")
+    if alerted == 0:
+        logger.info("Amara: no new executed trades above 15% edge this cycle.")
     else:
-        logger.info(f"Amara: current UTC hour {current_hour} is not a digest slot — buffer updated only.")
+        logger.info(f"Amara: {alerted} trade alert(s) posted.")
