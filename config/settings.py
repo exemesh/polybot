@@ -45,6 +45,10 @@ class Settings:
     DISCORD_ANALYST_CHANNEL_ID: str = field(default_factory=lambda: os.getenv("DISCORD_ANALYST_CHANNEL_ID", ""))
 
     # ─── Discord Agent Webhooks (per-agent identity) ─────────────────
+    # Current agents
+    DISCORD_WEBHOOK_AMARA: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_AMARA", os.getenv("DISCORD_WEBHOOK_RECON", os.getenv("DISCORD_WEBHOOK_BLAZE", ""))))
+    DISCORD_WEBHOOK_PIA: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_PIA", os.getenv("DISCORD_WEBHOOK_SAGE", os.getenv("DISCORD_WEBHOOK_SENTINEL", ""))))
+    # Legacy fallbacks
     DISCORD_WEBHOOK_RECON: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_RECON", ""))
     DISCORD_WEBHOOK_BLAZE: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_BLAZE", ""))
     DISCORD_WEBHOOK_SAGE: str = field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_SAGE", ""))
