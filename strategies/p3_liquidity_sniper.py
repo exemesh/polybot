@@ -60,7 +60,7 @@ class P3LiquiditySniper:
             if vol < MIN_TOTAL_VOLUME or vol > MAX_TOTAL_VOLUME:
                 continue
             candidates.append((spread, m))
-        candidates.sort(reverse=True)
+        candidates.sort(key=lambda x: x[0], reverse=True)
 
         # Evaluate top candidates (limit LLM calls)
         for spread, market in candidates[:8]:
