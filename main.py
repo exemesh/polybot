@@ -39,7 +39,7 @@ from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
 from strategies.swarm_forecaster import SwarmForecasterStrategy
 # ── V3 P-Agents + MetaAgent + Evolution ──────────────────────────────────────
-from strategies.p1_sentiment_spike import P1SentimentSpike
+from strategies.p1_sentiment_spike import P1SentimentSpikeRider as P1SentimentSpike
 from strategies.p2_overreaction_fader import P2OverreactionFader
 from strategies.p3_liquidity_sniper import P3LiquiditySniper
 from core.meta_agent import MetaAgent
