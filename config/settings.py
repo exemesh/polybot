@@ -85,6 +85,20 @@ class Settings:
     ODDS_API_KEY: str = field(default_factory=lambda: os.getenv("ODDS_API_KEY", ""))
     DRY_RUN: bool = field(default_factory=lambda: os.getenv("DRY_RUN", "true").lower() == "true")
 
+    # ─── V3 MIROFISH P-Agents ────────────────────────────────────────
+    ENABLE_P1_SENTIMENT_SPIKE: bool = True    # RSS sentiment → immediate entry on breaking news
+    ENABLE_P2_OVERREACTION_FADER: bool = True # 18%+ price moves → fade if reactionary
+    ENABLE_P3_LIQUIDITY_SNIPER: bool = True   # Wide spread (>6%) → LLM fair value entry
+    # ─── V3 MetaAgent + Evolution ────────────────────────────────────
+    EVOLUTION_ENABLED: bool = True
+    EVOLUTION_CYCLE_INTERVAL: int = 20        # Run evolution pass every 20 cycles
+    META_AGENT_MIN_EDGE: float = 0.07         # 7% net edge required
+    META_AGENT_MAX_SIGNALS: int = 5           # Max trades per cycle from MetaAgent
+    PROB_CONVERGENCE_EXITS: bool = True       # Exit at probability convergence tiers
+    # ─── V3 Risk Parameters ──────────────────────────────────────────
+    MAX_POSITION_USD: float = 20.0            # V3 hard cap per trade ($20)
+    CLUSTER_EXPOSURE_CAP: float = 0.20        # Max 20% in any one correlated cluster
+
     # ─── Weather Strategy Config ─────────────────────────────────────
     WEATHER_CITIES: list = field(default_factory=lambda: [
         {"name": "New York", "lat": 40.7128, "lon": -74.0060, "station": "KNYC"},

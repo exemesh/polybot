@@ -27,6 +27,10 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "polybot.db")
 BOT_CONTROL_PATH = os.path.join(DATA_DIR, "bot_control.json")
 
+# Kalbot status.json — sibling directory
+_POLYBOT_ROOT = os.path.dirname(os.path.dirname(__file__))
+KALBOT_STATUS_PATH = os.path.join(_POLYBOT_ROOT, "..", "kalbot", "data", "status.json")
+
 ANALYTICS_LAST_POSTS_PATH = os.path.join(DATA_DIR, "pia_analytics_last_posts.json")
 RISK_SENT_ALERTS_PATH = os.path.join(DATA_DIR, "pia_sent_alerts.json")
 
@@ -113,6 +117,18 @@ def _mark_sent(sent_data: dict, alert_key: str) -> None:
 
 
 # ── Database helpers ─────────────────────────────────────────────────────────
+
+def load_kalbot_status() -> dict:
+    """Load kalbot's status.json for cross-bot reporting."""
+    path = os.path.normpath(KALBOT_STATUS_PATH)
+    try:
+        if os.path.exists(path):
+            with open(path) as f:
+                return json.load(f)
+    except Exception as exc:
+        logger.warning(f"Pia: kalbot status.json read failed: {exc}")
+    return {}
+
 
 def load_bot_control(path: str) -> dict:
     try:
@@ -492,14 +508,43 @@ async def _run_analytics(discord: DiscordAlerts, current_hour: int, now: datetim
         "inline": False,
     })
 
+    # ── Kalbot section ────────────────────────────────────────────────────────
+    kalbot_status = await asyncio.to_thread(load_kalbot_status)
+    if kalbot_status:
+        k_balance   = kalbot_status.get("balance_usd", 0.0)
+        k_daily     = kalbot_status.get("daily_pnl", 0.0)
+        k_total     = kalbot_status.get("total_pnl", 0.0)
+        k_win_rate  = kalbot_status.get("win_rate_pct", 0.0)
+        k_open      = kalbot_status.get("open_positions", 0)
+        k_trades    = kalbot_status.get("trades_today", 0)
+        k_dry       = kalbot_status.get("dry_run", True)
+        k_updated   = kalbot_status.get("updated_at", "unknown")
+        k_mode      = "DRY RUN" if k_dry else "LIVE"
+        fields.append({
+            "name": "─── Kalshi (KalBot) ───",
+            "value": (
+                f"Mode: **{k_mode}** | Balance: **${k_balance:.2f}**\n"
+                f"Daily P&L: ${k_daily:+.2f} | Total P&L: ${k_total:+.2f}\n"
+                f"Win Rate: {k_win_rate:.1f}% | Open: {k_open} | Trades Today: {k_trades}\n"
+                f"Last update: {k_updated[:16]}"
+            ),
+            "inline": False,
+        })
+    else:
+        fields.append({
+            "name": "─── Kalshi (KalBot) ───",
+            "value": "Status unavailable — kalbot may not have run yet",
+            "inline": False,
+        })
+
     color = COLOR_GREEN if realized_pnl >= 0 else COLOR_RED
     embed = {
         "title": f"Pia Analytics Report — {slot_label} UTC",
-        "description": f"Polymarket snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
+        "description": f"Polymarket + Kalshi snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
         "color": color,
         "fields": fields,
         "timestamp": now.isoformat(),
-        "footer": {"text": "PolyBot Pia"},
+        "footer": {"text": "Pia — Analytics & Risk"},
     }
 
     webhook_url = os.getenv("DISCORD_WEBHOOK_PIA", "")
@@ -603,6 +648,35 @@ async def _run_risk_monitor(discord: DiscordAlerts, now: datetime) -> None:
                 logger.warning(f"Pia: daily P&L critical loss alert sent (${daily_pnl:.4f}).")
             else:
                 logger.info("Pia: daily loss alert already sent today — skipping.")
+
+    # ── 3. Kalbot daily loss check ─────────────────────────────────────────
+    kalbot_status = await asyncio.to_thread(load_kalbot_status)
+    if kalbot_status:
+        k_daily = kalbot_status.get("daily_pnl", 0.0)
+        if k_daily is not None and k_daily < -DAILY_LOSS_CRITICAL_PCT:
+            alert_key = f"kalbot_daily_loss_{now.strftime('%Y-%m-%d')}"
+            if not _already_sent(sent_data, alert_key):
+                embed = {
+                    "title": "CRITICAL — Kalshi Daily Loss Exceeded Threshold",
+                    "description": (
+                        f"KalBot today's loss: **${abs(k_daily):.4f}**\n"
+                        f"This exceeds the ${DAILY_LOSS_CRITICAL_PCT:.2f} alert threshold.\n"
+                        f"Check KalBot open positions."
+                    ),
+                    "color": COLOR_RED,
+                    "timestamp": now_iso,
+                    "footer": {"text": "Pia — Risk"},
+                }
+                if webhook_url:
+                    await discord.send_webhook(
+                        webhook_url, embed=embed, username="Pia",
+                        avatar_url="https://i.imgur.com/OB0y6MR.png",
+                    )
+                else:
+                    await discord._post_channel_message(PIA_CHANNEL, embed)
+                _mark_sent(sent_data, alert_key)
+                alert_count += 1
+                logger.warning(f"Pia: KalBot daily loss alert sent (${k_daily:.4f}).")
 
     _save_sent_alerts(sent_data)
     logger.info(f"Pia risk check complete. {alert_count} alert(s) sent.")

@@ -38,6 +38,12 @@ from strategies.news_arb import NewsArbitrageStrategy
 from strategies.profit_taker import ProfitTakerStrategy
 from strategies.ai_forecaster import AIForecasterStrategy
 from strategies.swarm_forecaster import SwarmForecasterStrategy
+# ── V3 P-Agents + MetaAgent + Evolution ──────────────────────────────────────
+from strategies.p1_sentiment_spike import P1SentimentSpike
+from strategies.p2_overreaction_fader import P2OverreactionFader
+from strategies.p3_liquidity_sniper import P3LiquiditySniper
+from core.meta_agent import MetaAgent
+from core.evolution import EvolutionEngine
 from core.win_rate_monitor import check as check_win_rate, format_discord_alert, load_recalibration
 from core.key_vault import init_vault, redacted_repr as vault_repr
 from core.reasoning_logger import init_reasoning_logger, log_cycle_summary
@@ -320,7 +326,19 @@ class PolyBot:
         if self.settings.ENABLE_SWARM_FORECASTER:
             self.strategies.append(SwarmForecasterStrategy(self.settings, self.portfolio, self.risk_manager))
 
-        logger.info(f"PolyBot initialized with {len(self.strategies)} strategies")
+        # ── V3 P-Agents ──────────────────────────────────────────────────────
+        self.p_agents = []
+        if self.settings.ENABLE_P1_SENTIMENT_SPIKE:
+            self.p_agents.append(P1SentimentSpike(self.settings, self.portfolio, self.risk_manager))
+        if self.settings.ENABLE_P2_OVERREACTION_FADER:
+            self.p_agents.append(P2OverreactionFader(self.settings, self.portfolio, self.risk_manager))
+        if self.settings.ENABLE_P3_LIQUIDITY_SNIPER:
+            self.p_agents.append(P3LiquiditySniper(self.settings, self.portfolio, self.risk_manager))
+
+        # ── V3 Evolution Engine ───────────────────────────────────────────────
+        self.evolution = EvolutionEngine(self.settings) if self.settings.EVOLUTION_ENABLED else None
+
+        logger.info(f"PolyBot initialized with {len(self.strategies)} strategies + {len(self.p_agents)} P-agents (V3)")
         mode_str = "LIVE TRADING" if not self.settings.DRY_RUN else "DRY RUN"
         halt_str = " [HALTED]" if self.control.is_halted else ""
         logger.info(f"Mode: {mode_str}{halt_str}")
@@ -433,6 +451,30 @@ class PolyBot:
             except Exception as e:
                 logger.error(f"Strategy {strategy.__class__.__name__} failed: {e}", exc_info=True)
                 await send_error_alert(str(e), strategy.__class__.__name__)
+
+        # ── V3: Run P-Agents via MetaAgent ───────────────────────────────────────
+        if self.p_agents and not _skip_strategies:
+            meta_agent = MetaAgent(
+                self.settings, self.portfolio, self.risk_manager,
+                evolution_engine=self.evolution
+            )
+            try:
+                v3_entries = await meta_agent.run_agents(self.p_agents, open_token_ids)
+                if v3_entries:
+                    logger.info(f"PolyBot V3: MetaAgent executed {v3_entries} P-agent trade(s)")
+            except Exception as e:
+                logger.error(f"PolyBot V3 MetaAgent failed: {e}", exc_info=True)
+
+        # ── V3 Evolution cycle ───────────────────────────────────────────────
+        if self.evolution:
+            try:
+                self.evolution.sync_from_portfolio(self.portfolio)
+                cycle_n = self.evolution.increment_cycle()
+                if self.evolution.should_evolve():
+                    logger.info(f"PolyBot Evolution: running pass at cycle {cycle_n}")
+                    self.evolution.evolve()
+            except Exception as e:
+                logger.warning(f"PolyBot evolution cycle failed: {e}")
 
         # Take portfolio snapshot
         self.portfolio.snapshot()
