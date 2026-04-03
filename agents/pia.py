@@ -516,16 +516,21 @@ async def _run_analytics(discord: DiscordAlerts, current_hour: int, now: datetim
         k_total     = kalbot_status.get("total_pnl", 0.0)
         k_win_rate  = kalbot_status.get("win_rate_pct", 0.0)
         k_open      = kalbot_status.get("open_positions", 0)
-        k_trades    = kalbot_status.get("trades_today", 0)
+        k_entries   = kalbot_status.get("entries_today", kalbot_status.get("trades_today", 0))
+        k_exits     = kalbot_status.get("exits_today", 0)
         k_dry       = kalbot_status.get("dry_run", True)
         k_updated   = kalbot_status.get("updated_at", "unknown")
         k_mode      = "DRY RUN" if k_dry else "LIVE"
+        k_strats    = kalbot_status.get("strategies_active", ["K1", "K2", "K3"])
+        k_strat_str = " · ".join(k_strats) if k_strats else "K1 · K2 · K3"
         fields.append({
-            "name": "─── Kalshi (KalBot) ───",
+            "name": "─── Kalshi (KalBot V3) ───",
             "value": (
                 f"Mode: **{k_mode}** | Balance: **${k_balance:.2f}**\n"
-                f"Daily P&L: ${k_daily:+.2f} | Total P&L: ${k_total:+.2f}\n"
-                f"Win Rate: {k_win_rate:.1f}% | Open: {k_open} | Trades Today: {k_trades}\n"
+                f"Daily P&L: **${k_daily:+.2f}** | Total P&L: ${k_total:+.2f}\n"
+                f"Win Rate: {k_win_rate:.1f}% | Open Positions: {k_open}\n"
+                f"Entries: {k_entries} | Exits: {k_exits}\n"
+                f"Strategies: `{k_strat_str}`\n"
                 f"Last update: {k_updated[:16]}"
             ),
             "inline": False,
@@ -539,8 +544,11 @@ async def _run_analytics(discord: DiscordAlerts, current_hour: int, now: datetim
 
     color = COLOR_GREEN if realized_pnl >= 0 else COLOR_RED
     embed = {
-        "title": f"Pia Analytics Report — {slot_label} UTC",
-        "description": f"Polymarket + Kalshi snapshot — {now.strftime('%Y-%m-%d %H:%M UTC')}",
+        "title": f"📊 Pia Analytics — {slot_label} UTC",
+        "description": (
+            f"**Polymarket V3 MIROFISH** (P1 · P2 · P3) + **Kalshi V3** (K1 · K2 · K3)\n"
+            f"{now.strftime('%Y-%m-%d %H:%M UTC')}"
+        ),
         "color": color,
         "fields": fields,
         "timestamp": now.isoformat(),

@@ -27,7 +27,7 @@ LOG_FILE  = HOME / "polybot/logs/polybot.log"
 PORTFOLIO = HOME / "polybot/data/portfolio.json"
 
 # Simple bearer token — set in .env or env var, defaults to a hard value
-API_TOKEN = os.getenv("API_TOKEN", "polybot-apex-2026")
+API_TOKEN = os.getenv("API_TOKEN", "polybot-nyx-2026")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/pause":
             ctrl["trading_enabled"] = False
             ctrl["halt_reason"] = "paused via API"
-            ctrl["updated_by"] = "apex-api"
+            ctrl["updated_by"] = "nyx-api"
             ctrl["updated_at"] = datetime.now(timezone.utc).isoformat()
             write_json(BOT_CTRL, ctrl)
             self.send_json(200, {"ok": True, "trading_enabled": False})
@@ -155,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/resume":
             ctrl["trading_enabled"] = True
             ctrl["halt_reason"] = None
-            ctrl["updated_by"] = "apex-api"
+            ctrl["updated_by"] = "nyx-api"
             ctrl["updated_at"] = datetime.now(timezone.utc).isoformat()
             write_json(BOT_CTRL, ctrl)
             self.send_json(200, {"ok": True, "trading_enabled": True})
