@@ -479,7 +479,24 @@ class SwarmForecasterStrategy:
         tokens = market.get("tokens", [])
         yes_t = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), None)
         no_t  = next((t for t in tokens if t.get("outcome", "").upper() == "NO"),  None)
+
+        # Gamma API returns clobTokenIds + outcomes instead of tokens[]
         if not yes_t or not no_t:
+            try:
+                clob_ids_raw = market.get("clobTokenIds", "[]")
+                token_ids = json.loads(clob_ids_raw) if isinstance(clob_ids_raw, str) else clob_ids_raw
+                outcomes_raw = market.get("outcomes", "[]")
+                outcomes = json.loads(outcomes_raw) if isinstance(outcomes_raw, str) else outcomes_raw
+                if len(token_ids) >= 2 and len(outcomes) >= 2:
+                    yes_idx = next((i for i, o in enumerate(outcomes) if str(o).lower() == "yes"), 0)
+                    no_idx  = next((i for i, o in enumerate(outcomes) if str(o).lower() == "no"),  1)
+                    yes_t = {"outcome": "YES", "token_id": str(token_ids[yes_idx])}
+                    no_t  = {"outcome": "NO",  "token_id": str(token_ids[no_idx])}
+            except Exception as e:
+                logger.debug(f"SwarmForecaster: could not resolve token IDs for {question[:40]}: {e}")
+
+        if not yes_t or not no_t:
+            logger.debug(f"SwarmForecaster: no token IDs for {question[:40]} — skipping")
             return False
 
         side = signal["side"]
