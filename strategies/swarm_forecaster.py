@@ -223,6 +223,11 @@ class SwarmForecasterStrategy:
                 continue
             if cid in self._traded and time.time() - self._traded[cid] < 14400:
                 continue
+            # DB-backed cooldown: skip if we traded this market in the last 24h
+            # (prevents re-entering the same losing market across restarts)
+            if self.portfolio.traded_recently(cid, hours=24):
+                logger.debug(f"SwarmForecaster: skipping {cid[:20]}... — traded within 24h cooldown")
+                continue
 
             result = await self._evaluate_market(market, news_headlines)
             if not result:

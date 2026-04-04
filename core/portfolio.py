@@ -74,6 +74,17 @@ class Portfolio:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def traded_recently(self, market_id: str, hours: int = 24) -> bool:
+        """Return True if this market_id was traded within the last `hours` hours.
+        Persists across restarts, preventing re-entry into recently-closed markets."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE market_id=? "
+                "AND timestamp > datetime('now', ?)",
+                (market_id, f"-{hours} hours")
+            ).fetchone()
+            return row[0] > 0
+
     def get_closed_trades_since(self, since_ts: str) -> List[Dict]:
         """Return closed trades with closed_at > since_ts. Used by EvolutionEngine."""
         with self._get_conn() as conn:
