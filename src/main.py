@@ -203,27 +203,54 @@ class PolyBotV4:
             await self._maybe_enter(coin_name, coin_cfg)
 
     # --- market discovery ---------------------------------------------
+    def _current_spot(self, coin_cfg) -> "Optional[float]":  # type: ignore
+        try:
+            return self.binance.get(coin_cfg.binance_symbol).last_price
+        except Exception:
+            return None
+
     async def _refresh_all_markets(self) -> None:
         for coin_name, coin_cfg in self.cfg.coins.items():
             if not coin_cfg.enabled:
                 continue
-            m = await self.discovery.get_active(coin_name, force=True)
+            m = await self.discovery.get_active(
+                coin_name,
+                current_spot=self._current_spot(coin_cfg),
+                min_fav_price=self.cfg.strategy.min_entry_price,
+                max_fav_price=self.cfg.strategy.max_entry_price,
+                target_fav_price=float(self.cfg.raw["strategy"].get("target_entry_price", 0.82)),
+                force=True,
+            )
             if m:
                 self._active_markets[coin_name] = m
                 self.pm_ws.ensure_subscribed([m.token_id_up, m.token_id_down])
         log.info("initial markets: %s", {k: v.slug for k, v in self._active_markets.items()})
 
     async def _refresh_all_markets_if_needed(self) -> None:
-        now = time.time()
-        for coin_name in list(self._active_markets.keys()):
-            m = self._active_markets[coin_name]
-            if not m.is_active or m.seconds_left < 3:
-                new_m = await self.discovery.get_active(coin_name, force=True)
-                if new_m:
+        for coin_name, coin_cfg in self.cfg.coins.items():
+            if not coin_cfg.enabled:
+                continue
+            cached = self._active_markets.get(coin_name)
+            need_refresh = (
+                cached is None
+                or not cached.is_active
+                or cached.seconds_left < 3
+                or (time.time() - cached.fetched_at) > 25
+            )
+            if need_refresh:
+                new_m = await self.discovery.get_active(
+                    coin_name,
+                    current_spot=self._current_spot(coin_cfg),
+                    min_fav_price=self.cfg.strategy.min_entry_price,
+                    max_fav_price=self.cfg.strategy.max_entry_price,
+                    target_fav_price=float(self.cfg.raw["strategy"].get("target_entry_price", 0.82)),
+                    force=True,
+                )
+                if new_m and (cached is None or new_m.slug != cached.slug):
                     self._active_markets[coin_name] = new_m
                     self.pm_ws.ensure_subscribed([new_m.token_id_up, new_m.token_id_down])
-                    log.info("market rolled for %s: %s (ends in %.0fs)",
-                             coin_name, new_m.slug, new_m.seconds_left)
+                    log.info("picked %s market: %s (strike $%s, ends in %.0fs)",
+                             coin_name, new_m.slug, int(new_m.strike), new_m.seconds_left)
 
     # --- entries ------------------------------------------------------
     async def _maybe_enter(self, coin: str, coin_cfg) -> None:

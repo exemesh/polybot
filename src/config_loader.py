@@ -15,7 +15,9 @@ class CoinConfig:
     name: str
     enabled: bool
     binance_symbol: str
-    market_slug_pattern: str
+    series_id: int
+    series_slug: str
+    window_length_sec: int
 
 
 @dataclass
@@ -142,7 +144,9 @@ def load(repo_root: Path) -> Config:
             name=name,
             enabled=bool(c["enabled"]),
             binance_symbol=c["binance_symbol"],
-            market_slug_pattern=c["market_slug_pattern"],
+            series_id=int(c["series_id"]),
+            series_slug=c.get("series_slug", ""),
+            window_length_sec=int(c.get("window_length_sec", 3600)),
         )
 
     # --- strategy
@@ -230,19 +234,22 @@ def load(repo_root: Path) -> Config:
         clob_host=os.getenv("CLOB_HOST", "https://clob.polymarket.com"),
         gamma_host=os.getenv("GAMMA_HOST", "https://gamma-api.polymarket.com"),
         polymarket_ws=os.getenv("POLYMARKET_WS", "wss://ws-subscriptions-clob.polymarket.com/ws/market"),
-        binance_ws=os.getenv("BINANCE_WS", "wss://stream.binance.com:9443/ws"),
+        binance_ws=os.getenv("BINANCE_WS", "wss://stream.binance.com:9443"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
 
     # Sanity checks
     if strategy.min_entry_price >= strategy.max_entry_price:
         raise RuntimeError("min_entry_price must be < max_entry_price")
-    if strategy.min_elapsed_sec + strategy.max_time_left_sec > 15 * 60:
-        raise RuntimeError(
-            f"min_elapsed_sec ({strategy.min_elapsed_sec}) + max_time_left_sec "
-            f"({strategy.max_time_left_sec}) > 900s (window length). "
-            f"Entry window is impossible."
-        )
+    # For each enabled coin, sanity-check the entry window fits in the coin's window length.
+    for c in coins.values():
+        if c.enabled and strategy.min_elapsed_sec + strategy.max_time_left_sec > c.window_length_sec:
+            raise RuntimeError(
+                f"strategy: min_elapsed_sec ({strategy.min_elapsed_sec}) + "
+                f"max_time_left_sec ({strategy.max_time_left_sec}) > "
+                f"window_length_sec ({c.window_length_sec}) for {c.name}. "
+                f"Entry window is impossible."
+            )
     if risk.min_bankroll_usd < 50:
         raise RuntimeError("min_bankroll_usd must be >= 50 (safety floor)")
 

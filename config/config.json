@@ -1,37 +1,33 @@
 {
-  "_description": "Polybot v4 — strategy + risk config. Hardcoded caps in src/safety_guard.py override these if they conflict.",
+  "_description": "Polybot v4.1 — multi-strike aware. ETH hourly is the only live hourly series as of Apr 2026.",
   "coins": {
-    "BTC": {
-      "enabled": true,
-      "binance_symbol": "btcusdt",
-      "market_slug_pattern": "bitcoin-up-or-down-"
-    },
     "ETH": {
       "enabled": true,
       "binance_symbol": "ethusdt",
-      "market_slug_pattern": "ethereum-up-or-down-"
+      "series_id": 11373,
+      "series_slug": "ethereum-multi-strikes-hourly",
+      "window_length_sec": 3600,
+      "_comment": "Hourly multi-strike. ~10 strike markets per hour, each Yes/No on 'ETH above $X at hh:00'."
     },
-    "SOL": {
+    "BTC": {
       "enabled": false,
-      "_comment": "Disabled by default on first run. Enable after 100 BTC/ETH trades.",
-      "binance_symbol": "solusdt",
-      "market_slug_pattern": "solana-up-or-down-"
-    },
-    "XRP": {
-      "enabled": false,
-      "_comment": "Disabled by default on first run.",
-      "binance_symbol": "xrpusdt",
-      "market_slug_pattern": "xrp-up-or-down-"
+      "binance_symbol": "btcusdt",
+      "series_id": 10202,
+      "series_slug": "bitcoin-multi-strikes-4h",
+      "window_length_sec": 14400,
+      "_comment": "4-hour multi-strike. Lower frequency — enable after ETH is profitable."
     }
   },
   "strategy": {
-    "_description": "Late Entry V3 — see README §2",
-    "min_elapsed_sec": 530,
-    "max_time_left_sec": 335,
+    "_description": "Late Entry V3 adapted for multi-strike. 'Favorite' = whichever side (YES/NO) of a chosen strike has higher ask.",
+    "min_elapsed_sec": 2100,
+    "max_time_left_sec": 1200,
+    "_comment_timing": "For 3600s hourly: enter between 35:00 and 40:00 elapsed (1200-1500s left). For 14400s BTC-4h: scale accordingly or override per coin.",
     "min_entry_price": 0.75,
     "max_entry_price": 0.88,
+    "target_entry_price": 0.82,
     "min_favorite_gap_pct": 30,
-    "min_vwap_deviation_pct": 3.0,
+    "min_vwap_deviation_pct": 2.0,
     "require_positive_momentum": true,
     "momentum_lookback_sec": 60,
     "signal_tick_ms": 500
@@ -57,13 +53,12 @@
     "stop_loss_usd_per_position": 12,
     "flip_stop_enabled": true,
     "flip_stop_threshold": 0.45,
-    "_comment": "flip_stop_threshold: exit if our side price drops below this (we're now the underdog)"
+    "_comment": "flip_stop_threshold: exit if our side mid drops below this (we're now the underdog)"
   },
   "blackouts": {
     "_description": "Don't trade during these windows",
-    "skip_first_n_minutes_of_window": 8,
-    "skip_weekends": false,
-    "_comment": "skip_weekends: set true if you notice thin-weekend liquidity hurts your win rate"
+    "skip_first_n_minutes_of_window": 30,
+    "skip_weekends": false
   },
   "logging": {
     "heartbeat_sec": 60,

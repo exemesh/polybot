@@ -1,8 +1,19 @@
-# Polybot v4 — Late Entry V3
+# Polybot v4.1 — Late Entry V3 (multi-strike aware)
 
-Single-strategy Polymarket trading bot for 15-minute BTC/ETH/SOL/XRP up-down
-markets. Replaces the 13-strategy v3 with one focused strategy and aggressive
-safety rails.
+Single-strategy Polymarket trading bot for hourly **multi-strike** crypto
+markets. As of April 2026, Polymarket has replaced binary up/down markets
+with multi-strike events (10 strike prices per hour, each Yes/No). This
+bot picks the strike whose favorite side is in the [0.75, 0.88] edge zone
+and applies the Late Entry V3 logic.
+
+Replaces the 13-strategy v3 with one focused strategy and aggressive safety
+rails.
+
+**Currently active series:**
+- **ETH hourly** (`ethereum-multi-strikes-hourly`, id 11373) — enabled by default
+- **BTC 4-hourly** (`bitcoin-multi-strikes-4h`, id 10202) — disabled by default
+  (lower frequency; enable after ETH is profitable)
+- **SOL/XRP** — no equivalent series exists right now
 
 ## Why this replaces the old polybot
 
@@ -20,21 +31,26 @@ resolution.
 
 Every 500ms, for each enabled coin:
 
-1. Read Binance BTC/ETH/SOL/XRP 1-second price.
-2. Read the Polymarket order book for the active 15-minute up/down market.
-3. Check the 5 entry conditions. If **all** pass, place a Fill-And-Kill BUY on
+1. Read Binance ETHUSDT (or BTCUSDT) 1-second price.
+2. Query the Polymarket Gamma API for the currently-active event in the coin's
+   multi-strike series (e.g., `ethereum-above-on-april-24-2026-7pm-et`).
+3. Among the ~10 strike markets in that event, pick the one whose favorite
+   side (Yes if yes_price > 0.5, else No) sits closest to $0.82 within the
+   edge zone $[0.75, 0.88]$.
+4. Read the Polymarket order book WS for that chosen strike.
+5. Check the 5 entry conditions. If **all** pass, place a Fill-And-Kill BUY on
    the favorite side.
-4. Track the open position; exit on stop-loss, flip-stop, or let it resolve.
+6. Track the open position; exit on stop-loss, flip-stop, or let it resolve.
 
 Entry conditions (all five required):
 
-- Favorite price in `[0.75, 0.88]`
-- ≥ 530 seconds elapsed in the 15-minute window (i.e., < 6:50 left)
-- ≤ 335 seconds left (i.e., > 5:35 elapsed) — **wait, these combine to a
-  55-second sweet spot** at 8:50–9:25 into the window. This is deliberate.
-  Earlier = too much time for reversal. Later = not enough time for the edge
-  to materialize.
-- VWAP deviation ≥ 3% (favorite is extending, not just holding)
+- A strike market exists with favorite-side price in `[0.75, 0.88]`
+- ≥ 2100s elapsed in the hourly window (i.e., ≤ 25:00 remaining)
+- ≤ 1200s remaining (i.e., ≥ 40:00 elapsed) — **the sweet spot is
+  35:00–40:00 into the hour**. Earlier = too much time for reversal. Later
+  = not enough time for edge to materialize.
+- VWAP deviation ≥ 2% (favorite-side direction is confirmed by recent
+  Binance price action)
 - Positive Binance momentum in last 60 seconds (confirms direction)
 
 Exits:

@@ -1,8 +1,12 @@
 # Known limitations & things to verify before going live
 
-I built this bot without being able to run it against live APIs. The following
-items are **best-guess** implementations that you MUST verify during the
-dry-run phase before enabling `--live`.
+**Update v4.1 (2026-04-24):** Items 1, 4 below have been validated by running
+the bot against live Polymarket Gamma + Binance APIs in a sandbox. The bot
+connects, discovers active hourly multi-strike events, parses strike prices,
+and correctly waits when no strike is in the edge zone.
+
+The remaining items below are best-guess implementations that you MUST
+verify during the dry-run phase before enabling `--live`.
 
 ## 1. Polymarket CLOB order response field names
 
