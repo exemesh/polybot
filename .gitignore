@@ -1,45 +1,15 @@
-# Environment
 .env
-
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
+.env.*
+!.env.example
 venv/
-
-# Data (persisted via GH Actions artifacts)
+__pycache__/
+*.pyc
+logs/
 data/*.db
 data/*.sqlite
-
-# Logs
-logs/
-
-# Dashboard data (generated at runtime)
-dashboard/dashboard_data.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# OS
+data/recordings/
+*.log
+EMERGENCY_STOP
 .DS_Store
-Thumbs.db
-
-# Runtime state files - never track these
-data/apex_last_startup.json
-data/recon_opportunity_buffer.json
-data/recon_last_posts.json
-data/sage_last_posts.json
-data/guardian_sent_alerts.json
-data/scout_last_opportunities.json
-data/xrp_price_cache.json
-data/polybot.db
-data/bot_control.json
-data/recalibration.json
-data/auto_research_log.json
-data/.polybot.lock
-*.bak
+.idea/
+.vscode/

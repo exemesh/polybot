@@ -1,135 +1,213 @@
-# PolyBot - Polymarket Trading Bot
+# Polybot v4 — Late Entry V3
 
-Automated trading bot for Polymarket prediction markets. Runs on GitHub Actions (free) with a GitHub Pages dashboard.
+Single-strategy Polymarket trading bot for 15-minute BTC/ETH/SOL/XRP up-down
+markets. Replaces the 13-strategy v3 with one focused strategy and aggressive
+safety rails.
 
-## Strategies
+## Why this replaces the old polybot
 
-- **Weather Arbitrage** - Compares Open-Meteo weather forecasts against Polymarket temperature markets. Buys underpriced outcomes when forecast confidence exceeds market price.
-- **Cross-Platform Arbitrage** - Detects YES+NO < $1.00 pricing inefficiencies on Polymarket, and cross-platform price discrepancies with Kalshi.
+The old polybot ran 13 strategies in one process, most of them LLM-driven
+directional bets with no measurable edge. It lost $161.58.
 
-## Setup
+This bot runs **one strategy** — Late Entry V3, derived from
+[txbabaxyz/4coinsbot](https://github.com/txbabaxyz/4coinsbot) and adapted for a
+$300 bankroll with hardcoded safety caps. It only trades the last ~5 minutes
+of each 15-minute window, only buys the favorite when the price is in the
+$0.75–$0.88 edge zone, and exits on stop-loss, flip-stop, or natural
+resolution.
 
-### 1. Create GitHub Repository
+## What it actually does
 
-Create a new **private** repository on GitHub, then push this code:
+Every 500ms, for each enabled coin:
+
+1. Read Binance BTC/ETH/SOL/XRP 1-second price.
+2. Read the Polymarket order book for the active 15-minute up/down market.
+3. Check the 5 entry conditions. If **all** pass, place a Fill-And-Kill BUY on
+   the favorite side.
+4. Track the open position; exit on stop-loss, flip-stop, or let it resolve.
+
+Entry conditions (all five required):
+
+- Favorite price in `[0.75, 0.88]`
+- ≥ 530 seconds elapsed in the 15-minute window (i.e., < 6:50 left)
+- ≤ 335 seconds left (i.e., > 5:35 elapsed) — **wait, these combine to a
+  55-second sweet spot** at 8:50–9:25 into the window. This is deliberate.
+  Earlier = too much time for reversal. Later = not enough time for the edge
+  to materialize.
+- VWAP deviation ≥ 3% (favorite is extending, not just holding)
+- Positive Binance momentum in last 60 seconds (confirms direction)
+
+Exits:
+
+- **Flip-stop** — your side becomes the underdog. Exit immediately. (You
+  bought UP at 0.82, UP is now 0.45, something reversed, get out.)
+- **Stop-loss** — unrealized P&L below `-$12` per position.
+- **Natural resolution** — market closes, position redeems on-chain.
+
+## Safety defaults (hardcoded, not config)
+
+- `DRY_RUN_DEFAULT = True` — you must pass `--live` + confirm to trade real
+  money.
+- `MAX_BET_USD = 5` — hardcoded, cannot be raised via config without editing
+  source.
+- `DAILY_LOSS_CAP_USD = 30` — bot auto-pauses until UTC midnight if hit.
+- `WEEKLY_LOSS_CAP_USD = 60` — bot requires manual restart if hit.
+- `CONSECUTIVE_LOSS_LIMIT = 6` — bot auto-pauses 24h, regenerate win_rate
+  before resuming.
+- `MAX_CONCURRENT_POSITIONS = 2` across all coins.
+- `MIN_BANKROLL_USD = 50` — bot halts if wallet drops below this.
+- Emergency stop: touch `EMERGENCY_STOP` file in repo root → bot flattens all
+  positions and exits.
+
+## Repo layout
+
+```
+polybot-v4/
+├── README.md                 this file
+├── .env.example              copy to .env and fill in
+├── .gitignore
+├── requirements.txt
+├── config/
+│   └── config.json           strategy parameters
+├── src/
+│   ├── main.py               entry point
+│   ├── config_loader.py      loads + validates config.json and .env
+│   ├── logger.py             structured JSON logging
+│   ├── binance_feed.py       Binance WebSocket (1s klines for 4 coins)
+│   ├── polymarket_client.py  Polymarket CLOB REST + order placement
+│   ├── polymarket_ws.py      Polymarket order-book WebSocket
+│   ├── market_discovery.py   Find active 15-min markets via Gamma API
+│   ├── strategy.py           Late Entry V3 signal logic
+│   ├── risk_manager.py       Sizing, caps, daily limits
+│   ├── position_tracker.py   Track open positions + P&L
+│   ├── profit_taker.py       Exit logic
+│   ├── safety_guard.py       Emergency stop, pre-trade validation
+│   └── trade_logger.py       JSONL trade history
+├── scripts/
+│   ├── setup_mac.sh          one-command setup
+│   ├── run.sh                manual run with venv
+│   └── analyze_trades.py     post-hoc win-rate analysis
+├── launchd/
+│   └── com.polybot.v4.plist.template
+└── logs/                     gitignored
+```
+
+## Setup (Mac mini / macOS)
 
 ```bash
-git remote add origin https://github.com/YOUR_USERNAME/polybot.git
-git push -u origin main
-```
-
-### 2. Add Secrets
-
-Go to **Settings > Secrets and variables > Actions** and add:
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `PRIVATE_KEY` | Yes | Polygon wallet private key (0x...) |
-| `DRY_RUN` | No | `true` (default) or `false` for live |
-| `INITIAL_CAPITAL` | No | Starting capital, default `100` |
-| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for alerts |
-| `KALSHI_API_KEY` | No | For cross-platform arbitrage |
-| `KALSHI_API_SECRET` | No | For cross-platform arbitrage |
-| `OPENAI_API_KEY` | No | For AI forecaster strategy |
-
-### 3. Enable GitHub Actions
-
-Go to **Actions** tab and enable workflows. The bot runs every 10 minutes automatically.
-
-You can also trigger a manual run: **Actions > PolyBot Trading > Run workflow**.
-
-### 4. Enable Dashboard
-
-Go to **Settings > Pages**:
-- Source: **Deploy from a branch**
-- Branch: **gh-pages** / **(root)**
-
-Dashboard will be available at: `https://YOUR_USERNAME.github.io/polybot/`
-
-## Architecture
-
-```
-GitHub Actions (cron every 10min)
-    ├── Restore SQLite DB from artifact
-    ├── Run single scan cycle (weather + arb strategies)
-    ├── Export dashboard JSON
-    ├── Save DB artifact (90-day retention)
-    └── Deploy dashboard to GitHub Pages
-```
-
-## Risk Management
-
-- Quarter-Kelly position sizing
-- Max 5% per trade, 40% total exposure
-- 10% daily loss limit auto-halts trading
-- Starts in DRY_RUN mode (paper trading)
-
-## Mac mini Local Runner (Recommended)
-
-Running on a Mac mini gives you reliable 5-minute intervals (GitHub Actions free
-tier often delays by 20–60 minutes). The bot runs as a launchd service that
-starts on login and fires every 5 minutes.
-
-### Prerequisites
-
-- macOS 12+ (Monterey or later)
-- Python 3.11+ (`brew install python@3.11`)
-- The repo cloned to `~/polybot`
-
-### One-command setup
-
-```bash
+# 1. Clone or replace (see "Replacing the old polybot" at the bottom)
 cd ~/polybot
-chmod +x scripts/setup_mac_mini.sh
-./scripts/setup_mac_mini.sh
+
+# 2. One-command setup
+chmod +x scripts/setup_mac.sh
+./scripts/setup_mac.sh
+
+# 3. Configure credentials
+nano .env
+# Fill in PRIVATE_KEY, POLYMARKET_API_KEY, POLYMARKET_API_SECRET,
+# POLYMARKET_API_PASSPHRASE, and optionally TELEGRAM_BOT_TOKEN
+
+# 4. Dry-run test (no real trades)
+./scripts/run.sh
+# Let it run for 3–4 hours during US crypto market hours.
+# Check logs/trades.jsonl — it should be logging "would have entered" events.
+
+# 5. Only after 50+ dry-run trades and a verified win rate ≥ required
+#    break-even, go live:
+./scripts/run.sh --live
+# You will get a confirmation prompt. Read it carefully.
 ```
 
-This will:
-1. Create a virtual environment at `~/polybot-env`
-2. Install all Python requirements
-3. Create a `.env` file template at `~/polybot/.env`
-4. Install the launchd plist to `~/Library/LaunchAgents/`
-5. Load the service (bot starts running immediately)
+## Gate to go live
 
-### Configure secrets
+Do **not** flip `--live` until you can answer yes to all of these:
 
-Edit `~/polybot/.env` and fill in your values:
+- [ ] 50+ dry-run trades in `logs/trades.jsonl`
+- [ ] Simulated win rate ≥ average entry price (if avg entry = 0.82, win rate
+      must be ≥ 82% — this is the break-even wall)
+- [ ] No unexplained errors in `logs/error.log` in the last 24h
+- [ ] Wallet funded with exactly $50 (not $300 — start small, scale after 50
+      real trades)
+- [ ] You've read `src/safety_guard.py` end-to-end and understand what it
+      will and won't catch
+- [ ] You've set a calendar reminder to check the bot at 12h, 24h, and 72h
+
+## Daily ops
+
+- Check `logs/trades.jsonl` each morning. Tail `logs/bot.log` during market
+  hours.
+- Telegram alerts fire on each trade and daily P&L (if configured).
+- Emergency stop: `touch ~/polybot/EMERGENCY_STOP` from any shell. Bot
+  flattens positions and exits within 2 seconds.
+
+## Kill criteria (automated)
+
+Bot auto-pauses itself if any of:
+
+- Daily loss ≥ $30 → pause until UTC midnight
+- Weekly loss ≥ $60 → pause, require manual restart
+- 6 consecutive losses → pause 24h, requires regenerate win_rate
+- Bankroll < $50 → halt permanently, requires manual restart
+- Binance WebSocket disconnected > 30s → flatten open positions
+- Polymarket order rejected 3 times in a row → flatten, pause 5 min
+
+Bot alerts you via Telegram (if configured) on every auto-pause.
+
+## Expected performance — honest ranges
+
+For a $50 starting bankroll, $1–$5 bet sizes:
+
+| Metric | Realistic range |
+|---|---|
+| Trades per day | 4–20 (depends on volatility regime) |
+| Win rate | 58–66% if edge holds |
+| Avg edge per trade after fees | 3–8% of stake |
+| Monthly return on $50 | −30% to +80% (wide by design, small sample) |
+| Max drawdown in first 30 days | 40–60% expected; 80%+ possible |
+| Probability of zero in 90 days | 15–25% even with real edge |
+
+If you want higher conviction, scale the bankroll *after* 100 real winning
+trades, not before.
+
+## Replacing the old polybot
+
+To replace your existing polybot repo with this bot, from your polybot root:
 
 ```bash
-nano ~/polybot/.env
+# 1. Archive the old version (safety)
+cd ~/polybot
+git checkout -b archive-v3-$(date +%Y%m%d)
+git push origin archive-v3-$(date +%Y%m%d)
+
+# 2. Wipe main, copy new files in
+git checkout main
+git rm -r .
+# Copy all files from this polybot-v4 directory into ~/polybot
+cp -R /path/to/polybot-v4/. .
+
+# 3. Commit and force-push
+git add .
+git commit -m "v4: single-strategy Late Entry V3 replacement"
+git push --force-with-lease origin main
+
+# 4. Unload old launchd, load new
+launchctl unload ~/Library/LaunchAgents/com.polybot.trader.plist 2>/dev/null || true
+cp launchd/com.polybot.v4.plist.template ~/Library/LaunchAgents/com.polybot.v4.plist
+# Edit the plist to set the correct paths for your user
+sed -i '' "s|/Users/USERNAME|$HOME|g" ~/Library/LaunchAgents/com.polybot.v4.plist
+launchctl load -w ~/Library/LaunchAgents/com.polybot.v4.plist
 ```
 
-### Manage the service
+The archive branch is your safety net — you can always `git checkout archive-v3-YYYYMMDD` if something goes wrong.
 
-```bash
-# Stop the bot
-launchctl unload ~/Library/LaunchAgents/com.polybot.trader.plist
+## License
 
-# Start the bot
-launchctl load -w ~/Library/LaunchAgents/com.polybot.trader.plist
+MIT. Derivative of concepts from
+[txbabaxyz/4coinsbot](https://github.com/txbabaxyz/4coinsbot) and
+[txbabaxyz/btc-15m-live](https://github.com/txbabaxyz/btc-15m-live) (both MIT).
 
-# Run once manually (with live log output)
-./scripts/run_local.sh
+## Disclaimer
 
-# Watch logs
-tail -f ~/polybot/logs/polybot.log
-```
-
-### Discord Alerts
-
-Set `DISCORD_WEBHOOK_URL` in your `.env` to receive real-time alerts:
-- Trade executions (rich embed with market, side, size, price, reason)
-- Daily PnL summaries (green/red embed based on profit/loss)
-- Error alerts (red embed with strategy name and error message)
-- Bot heartbeat (green for LIVE, yellow for DRY RUN)
-
-Create a webhook: Discord server → Channel settings → Integrations → Webhooks
-
----
-
-## Going Live
-
-1. Fund a Polygon wallet with $100 USDC
-2. Set `PRIVATE_KEY` in `~/.env` (local) or as a repository secret (GitHub Actions)
-3. Set `DRY_RUN=false`
-4. Monitor via dashboard and Discord alerts
+This is experimental software. You will likely lose money. Read every source
+file before running with real funds. The authors are not liable for your
+losses.
